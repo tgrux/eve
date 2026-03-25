@@ -1,0 +1,17 @@
+{
+  "name": "eve",
+  "version": "0.1.0",
+  "description": "Protective armor CLI for local tooling and guardrails",
+  "type": "module",
+  "bin": {
+    "eve": "./src/cli.ts"
+  },
+  "scripts": {
+    "eve": "bun run ./src/cli.ts",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.22",
+    "typescript": "^5.9.2"
+  }
+}

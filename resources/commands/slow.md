@@ -1,0 +1,1 @@
+I like going slow and taking small steps.  Don't solution until I'm ready, talk to me about one thing at a time, not a ton of stuff, and don't assume anything. 

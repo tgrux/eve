@@ -1,0 +1,1 @@
+I'd like your help putting together some brief notes from meeting transcripts.  I want the notes to be twitter length, really short, focused first on what the topic was, then what the outcome(s) were.  It should not be a ton of bullet points.

@@ -1,0 +1,43 @@
+{
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "excludedCommands": ["docker"],
+    "network": {
+      "allowedDomains": ["github.com", "*.npmjs.org"],
+      "allowLocalBinding": false
+    }
+  },
+  "deny": [
+    "Read(./.env)",
+    "Read(./secrets/**)",
+    "Read(./config.json)",
+    "Bash(git push:*)",
+    "Bash(git tag:*)"
+  ],
+  "allow": [
+    "Bash(node:*)",
+    "Bash(tmg:*)",
+    "Bash(find:*)",
+    "Bash(grep:*)",
+    "Bash(curl:*)",
+    "Bash(ls:*)",
+    "Bash(git:*)",
+    "Bash(npx tsc:*)",
+    "Bash(bun*)",
+    "Bash(npm*)",
+    "Bash(chmod:*)",
+    "Bash(./*)",
+    "Bash(tree:*)",
+    "Bash(pm:*)",
+    "Bash(walle:*)",
+    "Bash(tmg:*)",
+    "WebSearch",
+    "mcp__acp__Bash",
+    "mcp__acp__Edit",
+    "mcp__acp__Write"
+  ]
+}

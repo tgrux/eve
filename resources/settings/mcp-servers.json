@@ -1,0 +1,46 @@
+{
+  "_comment": "MCP server configurations for Claude Code. These will be written to .mcp.json (project-scope) when selected. See: https://code.claude.com/docs/en/mcp",
+  "_note": "MCP servers CANNOT be configured in settings.json/settings.local.json - they must be in .mcp.json (project), ~/.claude.json (user), or managed-mcp.json (system)",
+  "_schema": {
+    "server_name": {
+      "_description": "For our internal use - not part of Claude Code schema",
+      "name": "Display name for selection UI",
+      "description": "Description for selection UI",
+      "config": "Actual MCP server config (gets written to .mcp.json)",
+      "required_permissions": "Not used - MCP server permissions are managed separately by Claude Code"
+    }
+  },
+  "obsidian": {
+    "name": "Obsidian MCP",
+    "description": "Connect to Obsidian vault (update path after generation)",
+    "config": {
+      "command": "node",
+      "args": ["/path/to/obsidian-mcp/dist/server.js"]
+    },
+    "required_permissions": [
+      "mcp__obsidian__list_notes",
+      "mcp__obsidian__read_note",
+      "mcp__obsidian__create_note",
+      "mcp__obsidian__delete_note",
+      "mcp__obsidian__search_notes",
+      "mcp__obsidian__search_frontmatter"
+    ],
+    "note": "After generation, update the path in settings.local.json to your actual Obsidian MCP server path"
+  },
+  "chrome_devtools": {
+    "name": "Chrome DevTools MCP",
+    "description": "Control Chrome browser via DevTools protocol",
+    "config": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    }
+  },
+  "zenable": {
+    "name": "Zenable HTTP MCP",
+    "description": "Zenable AI services",
+    "config": {
+      "type": "http",
+      "url": "https://mcp.zenable.app/"
+    }
+  }
+}
