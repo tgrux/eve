@@ -1,9 +1,24 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
+import { stdin as input, stdout as output } from "node:process";
 
 const VERSION = "0.1.0";
 const REPO_ROOT = resolve(import.meta.dir, "..");
+const RESOURCES_ROOT = join(REPO_ROOT, "resources");
+const RESOURCE_COMMANDS_ROOT = join(RESOURCES_ROOT, "commands");
+const RESOURCE_HOOK_FILES_ROOT = join(RESOURCES_ROOT, "hooks");
+const RESOURCE_HOOK_SETTINGS_PATH = join(RESOURCES_ROOT, "settings", "hooks.json");
+const RESOURCE_SKILLS_ROOT = join(RESOURCES_ROOT, "skills");
 const HOME = homedir();
 const BANNER_LINES = [
   "+----------------------+",
@@ -36,6 +51,19 @@ type CommandResult = {
 
 type AiToolsOptions = {
   agent?: "claude" | "codex";
+};
+
+type Choice<T extends string> = {
+  value: T;
+  label: string;
+  description?: string;
+  selectable?: boolean;
+};
+
+type HookCatalogEntry = {
+  name?: string;
+  description?: string;
+  hooks?: Record<string, unknown>;
 };
 
 function colorize(text: string, ...styles: string[]) {
@@ -138,6 +166,11 @@ function readJsonFile(path: string) {
   }
 }
 
+function writeJsonFile(path: string, value: unknown) {
+  ensureDir(dirname(path));
+  writeFileSync(path, JSON.stringify(value, null, 2) + "\n", "utf8");
+}
+
 function readTomlFile(path: string) {
   if (!existsSync(path)) {
     return undefined;
@@ -190,6 +223,173 @@ function commandLabel(path: string, root: string) {
 
 function unique(items: string[]) {
   return [...new Set(items)].sort();
+}
+
+function ensureDir(path: string) {
+  mkdirSync(path, { recursive: true });
+}
+
+async function prompt(question: string) {
+  process.stdout.write(question);
+  input.resume();
+  input.setEncoding("utf8");
+
+  return await new Promise<string>((resolvePrompt) => {
+    const onData = (chunk: string) => {
+      input.off("data", onData);
+      resolvePrompt(chunk.replace(/\r?\n$/, "").trim());
+    };
+    input.on("data", onData);
+  });
+}
+
+function clearRenderedLines(count: number) {
+  for (let index = 0; index < count; index += 1) {
+    output.write("[1A");
+    output.write("[2K");
+  }
+}
+
+function findNextSelectableIndex<T extends string>(choices: Choice<T>[], start: number, direction: 1 | -1) {
+  let cursor = start;
+  for (let steps = 0; steps < choices.length; steps += 1) {
+    cursor = (cursor + direction + choices.length) % choices.length;
+    if (choices[cursor]?.selectable !== false) {
+      return cursor;
+    }
+  }
+  return start;
+}
+
+async function runPicker<T extends string>(
+  question: string,
+  choices: Choice<T>[],
+  options: { multi: boolean },
+) {
+  if (choices.length === 0) {
+    return [] as T[];
+  }
+
+  if (!input.isTTY || !output.isTTY) {
+    throw new CliError("Interactive selection requires a TTY.");
+  }
+
+  let cursor = choices.findIndex((choice) => choice.selectable !== false);
+  if (cursor === -1) {
+    return [] as T[];
+  }
+  const selected = new Set<number>();
+
+  const render = () => {
+    const lines = [
+      question,
+      colorize(
+        options.multi
+          ? "Use ↑/↓ to move, space to toggle, enter to confirm, q to cancel."
+          : "Use ↑/↓ to move, enter to confirm, q to cancel.",
+        colors.dim,
+      ),
+      ...choices.map((choice, index) => {
+        if (choice.selectable === false) {
+          return colorize("  " + choice.label, colors.bold, colors.blue);
+        }
+        const pointer = index === cursor ? colorize("›", colors.cyan, colors.bold) : " ";
+        const marker = options.multi
+          ? selected.has(index) ? colorize("[x]", colors.green, colors.bold) : colorize("[ ]", colors.dim)
+          : index === cursor ? colorize("(•)", colors.green, colors.bold) : colorize("( )", colors.dim);
+        const label = index === cursor ? colorize(choice.label, colors.bold, colors.cyan) : choice.label;
+        const suffix = choice.description ? colorize(" - " + choice.description, colors.dim) : "";
+        return `${pointer} ${marker} ${label}${suffix}`;
+      }),
+    ];
+    output.write(lines.join("\n") + "\n");
+    return lines.length;
+  };
+
+  let renderedLines = render();
+
+  return await new Promise<T[]>((resolvePicker, rejectPicker) => {
+    const finish = (value: T[]) => {
+      input.setRawMode?.(false);
+      input.pause();
+      input.off("data", onData);
+      clearRenderedLines(renderedLines);
+      resolvePicker(value);
+    };
+
+    const fail = (error: Error) => {
+      input.setRawMode?.(false);
+      input.pause();
+      input.off("data", onData);
+      clearRenderedLines(renderedLines);
+      rejectPicker(error);
+    };
+
+    const rerender = () => {
+      clearRenderedLines(renderedLines);
+      renderedLines = render();
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      const key = chunk.toString("utf8");
+
+      if (key === "") {
+        fail(new CliError("Selection cancelled.", 130));
+        return;
+      }
+
+      if (key === "q" || key === "Q") {
+        finish([]);
+        return;
+      }
+
+      if (key === "[A") {
+        cursor = findNextSelectableIndex(choices, cursor, -1);
+        rerender();
+        return;
+      }
+
+      if (key === "[B") {
+        cursor = findNextSelectableIndex(choices, cursor, 1);
+        rerender();
+        return;
+      }
+
+      if (options.multi && key === " ") {
+        if (selected.has(cursor)) {
+          selected.delete(cursor);
+        } else {
+          selected.add(cursor);
+        }
+        rerender();
+        return;
+      }
+
+      if (key === "\r") {
+        if (options.multi) {
+          finish([...selected].sort((left, right) => left - right).map((index) => choices[index]!.value));
+        } else {
+          finish([choices[cursor]!.value]);
+        }
+      }
+    };
+
+    input.setRawMode?.(true);
+    input.resume();
+    input.on("data", onData);
+  });
+}
+
+async function selectOne<T extends string>(question: string, choices: Choice<T>[]) {
+  const selected = await runPicker(question, choices, { multi: false });
+  if (selected.length === 0) {
+    throw new CliError("Selection cancelled.");
+  }
+  return selected[0]!;
+}
+
+async function selectMany<T extends string>(question: string, choices: Choice<T>[]) {
+  return await runPicker(question, choices, { multi: true });
 }
 
 function extractMcpNames(config: Record<string, unknown> | undefined) {
@@ -368,6 +568,276 @@ function aiTools(args: string[]) {
   }
 }
 
+function getCommandChoices(): Choice<string>[] {
+  return listFiles(RESOURCE_COMMANDS_ROOT, (path) => extname(path) === ".md").map((path) => ({
+    value: pathLabel(RESOURCE_COMMANDS_ROOT, path),
+    label: commandLabel(path, RESOURCE_COMMANDS_ROOT),
+    description: pathLabel(RESOURCE_COMMANDS_ROOT, path),
+  }));
+}
+
+function getSkillChoices(): Choice<string>[] {
+  return extractSkills(RESOURCE_SKILLS_ROOT).map((skill) => ({
+    value: skill,
+    label: skill,
+  }));
+}
+
+function getHookCatalog() {
+  const raw = readJsonFile(RESOURCE_HOOK_SETTINGS_PATH) ?? {};
+  return Object.fromEntries(
+    Object.entries(raw).filter(([key]) => !key.startsWith("_")),
+  ) as Record<string, HookCatalogEntry>;
+}
+
+function getHookChoices(): Choice<string>[] {
+  const catalog = getHookCatalog();
+  return Object.entries(catalog).map(([key, value]) => ({
+    value: key,
+    label: value.name ?? key,
+    description: value.description,
+  }));
+}
+
+function getResourceChoices(): Choice<string>[] {
+  const commandChoices = getCommandChoices().map((choice) => ({
+    value: "command:" + choice.value,
+    label: choice.label,
+    description: choice.description,
+  }));
+  const hookChoices = getHookChoices().map((choice) => ({
+    value: "hook:" + choice.value,
+    label: choice.label,
+    description: choice.description,
+  }));
+  const skillChoices = getSkillChoices().map((choice) => ({
+    value: "skill:" + choice.value,
+    label: choice.label,
+    description: "resources/skills/" + choice.value,
+  }));
+  return [
+    { value: "header:commands", label: "Commands", selectable: false },
+    ...commandChoices,
+    { value: "header:hooks", label: "Hooks", selectable: false },
+    ...hookChoices,
+    { value: "header:skills", label: "Skills", selectable: false },
+    ...skillChoices,
+  ];
+}
+
+function normalizeHookCommand(command: string) {
+  const hookDir = join(HOME, ".claude", "hooks").replace(/\\/g, "/");
+  return command
+    .replace(/"\$CLAUDE_PROJECT_DIR"\/\.claude\/hooks\//g, hookDir + "/")
+    .replace(/\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\//g, hookDir + "/");
+}
+
+function normalizeHookDefinition(definition: Record<string, unknown>) {
+  const clone = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+
+  for (const rules of Object.values(clone)) {
+    if (!Array.isArray(rules)) {
+      continue;
+    }
+    for (const rule of rules) {
+      if (!rule || typeof rule !== "object") {
+        continue;
+      }
+      const hooks = Array.isArray((rule as { hooks?: unknown[] }).hooks)
+        ? (rule as { hooks: unknown[] }).hooks
+        : [];
+      for (const hook of hooks) {
+        if (!hook || typeof hook !== "object") {
+          continue;
+        }
+        const record = hook as Record<string, unknown>;
+        if (typeof record.command === "string") {
+          record.command = normalizeHookCommand(record.command);
+        }
+      }
+    }
+  }
+
+  return clone;
+}
+
+function collectHookCommands(definition: Record<string, unknown>) {
+  const commands: string[] = [];
+  for (const rules of Object.values(definition)) {
+    if (!Array.isArray(rules)) {
+      continue;
+    }
+    for (const rule of rules) {
+      if (!rule || typeof rule !== "object") {
+        continue;
+      }
+      const hooks = Array.isArray((rule as { hooks?: unknown[] }).hooks)
+        ? (rule as { hooks: unknown[] }).hooks
+        : [];
+      for (const hook of hooks) {
+        if (!hook || typeof hook !== "object") {
+          continue;
+        }
+        const record = hook as Record<string, unknown>;
+        if (typeof record.command === "string") {
+          commands.push(record.command);
+        }
+      }
+    }
+  }
+  return unique(commands);
+}
+
+function mergeUniqueObjects(existing: unknown[], incoming: unknown[]) {
+  const seen = new Set(existing.map((value) => JSON.stringify(value)));
+  const merged = [...existing];
+  for (const value of incoming) {
+    const key = JSON.stringify(value);
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(value);
+    }
+  }
+  return merged;
+}
+
+function lstatSafe(path: string) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensureSymlink(sourcePath: string, targetPath: string) {
+  ensureDir(dirname(targetPath));
+  if (existsSync(targetPath) || lstatSafe(targetPath)) {
+    rmSync(targetPath, { recursive: true, force: true });
+  }
+  symlinkSync(sourcePath, targetPath);
+}
+
+function installCommands(selected: string[]) {
+  const targetRoot = join(HOME, ".claude", "commands");
+  ensureDir(targetRoot);
+
+  for (const relativePath of selected) {
+    const sourcePath = join(RESOURCE_COMMANDS_ROOT, relativePath);
+    const targetPath = join(targetRoot, relativePath);
+    ensureSymlink(sourcePath, targetPath);
+  }
+
+  printSuccess("Symlinked " + selected.length + " command" + (selected.length === 1 ? "" : "s") + " into ~/.claude/commands");
+}
+
+function installHooks(selected: string[]) {
+  const catalog = getHookCatalog();
+  const settingsPath = join(HOME, ".claude", "settings.json");
+  const settings = readJsonFile(settingsPath) ?? {};
+  const settingsRecord = settings as Record<string, unknown>;
+  const hooksRecord = settingsRecord.hooks && typeof settingsRecord.hooks === "object"
+    ? settingsRecord.hooks as Record<string, unknown>
+    : {};
+  settingsRecord.hooks = hooksRecord;
+
+  const permissions = settingsRecord.permissions && typeof settingsRecord.permissions === "object"
+    ? settingsRecord.permissions as Record<string, unknown>
+    : {};
+  settingsRecord.permissions = permissions;
+  const allow = Array.isArray(permissions.allow) ? permissions.allow as string[] : [];
+  permissions.allow = allow;
+
+  ensureDir(join(HOME, ".claude", "hooks"));
+  for (const hookFile of listFiles(RESOURCE_HOOK_FILES_ROOT, () => true)) {
+    const targetPath = join(HOME, ".claude", "hooks", pathLabel(RESOURCE_HOOK_FILES_ROOT, hookFile));
+    ensureSymlink(hookFile, targetPath);
+  }
+
+  for (const key of selected) {
+    const entry = catalog[key];
+    if (!entry || !entry.hooks || typeof entry.hooks !== "object") {
+      continue;
+    }
+
+    const normalizedHooks = normalizeHookDefinition(entry.hooks as Record<string, unknown>);
+    for (const [eventName, rules] of Object.entries(normalizedHooks)) {
+      if (!Array.isArray(rules)) {
+        continue;
+      }
+      const existingRules = Array.isArray(hooksRecord[eventName]) ? hooksRecord[eventName] as unknown[] : [];
+      hooksRecord[eventName] = mergeUniqueObjects(existingRules, rules);
+    }
+
+    for (const command of collectHookCommands(normalizedHooks)) {
+      const permission = "Bash(" + command + ")";
+      if (!allow.includes(permission)) {
+        allow.push(permission);
+      }
+    }
+  }
+
+  writeJsonFile(settingsPath, settingsRecord);
+  printSuccess("Installed " + selected.length + " hook set" + (selected.length === 1 ? "" : "s") + " into ~/.claude with symlinked hook files");
+}
+
+function installSkills(selected: string[], target: "codex" | "claude" | "both") {
+  const roots = target === "both"
+    ? [join(HOME, ".codex", "skills"), join(HOME, ".claude", "skills")]
+    : [join(HOME, target === "codex" ? ".codex" : ".claude", "skills")];
+
+  for (const root of roots) {
+    ensureDir(root);
+    for (const skill of selected) {
+      const sourcePath = join(RESOURCE_SKILLS_ROOT, skill);
+      const targetPath = join(root, skill);
+      ensureSymlink(sourcePath, targetPath);
+    }
+  }
+
+  const targetLabel = target === "both" ? "Codex and Claude" : target === "codex" ? "Codex" : "Claude";
+  printSuccess("Symlinked " + selected.length + " skill" + (selected.length === 1 ? "" : "s") + " into global " + targetLabel + " skills");
+}
+
+async function runAddWizard() {
+  printBanner();
+  console.log("");
+  printSection("Add Wizard");
+
+  const selected = await selectMany(
+    "Select the resources you want to add globally:",
+    getResourceChoices(),
+  );
+
+  if (selected.length === 0) {
+    printWarning("No resources selected.");
+    return;
+  }
+
+  const commands = selected.filter((value) => value.startsWith("command:")).map((value) => value.slice("command:".length));
+  const hooks = selected.filter((value) => value.startsWith("hook:")).map((value) => value.slice("hook:".length));
+  const skills = selected.filter((value) => value.startsWith("skill:")).map((value) => value.slice("skill:".length));
+
+  if (commands.length > 0) {
+    installCommands(commands);
+  }
+
+  if (hooks.length > 0) {
+    installHooks(hooks);
+  }
+
+  if (skills.length > 0) {
+    const target = await selectOne("Install selected skills for which agent?", [
+      { value: "codex", label: "Codex", description: "Install into ~/.codex/skills" },
+      { value: "claude", label: "Claude", description: "Install into ~/.claude/skills" },
+      { value: "both", label: "Both", description: "Install into both global skill directories" },
+    ]);
+    installSkills(skills, target);
+  }
+
+  printSuccess("Wizard complete.");
+}
+
 function printHelp() {
   printBanner();
   console.log("");
@@ -376,13 +846,15 @@ function printHelp() {
   console.log("Commands:");
   console.log("  " + colorize("setup", colors.bold) + "      Install deps and link eve globally");
   console.log("  " + colorize("doctor", colors.bold) + "     Show version, bin resolution, and repo diagnostics");
-  console.log("  " + colorize("tools", colors.bold) + "   List AI tools from global and cwd config");
+  console.log("  " + colorize("tools", colors.bold) + "      List AI tools from global and cwd config");
+  console.log("  " + colorize("add", colors.bold) + "        Wizard to install global commands, hooks, and skills from resources");
   console.log("  " + colorize("help", colors.bold) + "       Show this help");
   console.log("");
-  console.log("AI tools examples:");
+  console.log("Examples:");
   console.log("  eve tools");
   console.log("  eve tools codex");
   console.log("  eve tools claude");
+  console.log("  eve add");
   console.log("");
   console.log("Flags:");
   console.log("  " + colorize("-h, --help", colors.bold) + "       Show help");
@@ -450,6 +922,9 @@ export async function runCli(args: string[]) {
         return 0;
       case "tools":
         aiTools(rest);
+        return 0;
+      case "add":
+        await runAddWizard();
         return 0;
       case "help":
         printHelp();

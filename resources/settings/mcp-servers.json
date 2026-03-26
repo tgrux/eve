@@ -34,13 +34,5 @@
       "command": "npx",
       "args": ["-y", "chrome-devtools-mcp@latest"]
     }
-  },
-  "zenable": {
-    "name": "Zenable HTTP MCP",
-    "description": "Zenable AI services",
-    "config": {
-      "type": "http",
-      "url": "https://mcp.zenable.app/"
-    }
   }
 }
