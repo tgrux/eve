@@ -55,31 +55,5 @@
         }
       ]
     }
-  },
-  "zenable_prompts": {
-    "name": "Zenable MCP Integration",
-    "description": "Run Zenable MCP hook on prompt submit and stop",
-    "hooks": {
-      "UserPromptSubmit": [
-        {
-          "hooks": [
-            {
-              "type": "command",
-              "command": "uvx zenable-mcp@latest hook"
-            }
-          ]
-        }
-      ],
-      "Stop": [
-        {
-          "hooks": [
-            {
-              "type": "command",
-              "command": "uvx zenable-mcp@latest hook"
-            }
-          ]
-        }
-      ]
-    }
   }
 }

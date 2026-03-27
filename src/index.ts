@@ -66,6 +66,18 @@ type HookCatalogEntry = {
   hooks?: Record<string, unknown>;
 };
 
+type InstalledHook = {
+  eventName: string;
+  label: string;
+  rule: unknown;
+};
+
+type DoctorRow = {
+  label: string;
+  value: string;
+  note?: string;
+};
+
 function colorize(text: string, ...styles: string[]) {
   return styles.join("") + text + colors.reset;
 }
@@ -108,14 +120,41 @@ function formatList(items: string[]) {
   return items.length > 0 ? items.join(", ") : "none";
 }
 
-function printTable(rows: Array<[string, string]>) {
+function pluralize(count: number, singular: string, plural: string) {
+  return count === 1 ? singular : plural;
+}
+
+function doctorStatus(value: boolean) {
+  return value
+    ? colorize("yes", colors.green, colors.bold)
+    : colorize("no", colors.red, colors.bold);
+}
+
+function printDoctorSection(title: string, rows: DoctorRow[]) {
+  const labelWidth = Math.max(...rows.map((row) => row.label.length), 0);
+  console.log(colorize(title, colors.bold));
+  for (const row of rows) {
+    console.log(`  ${colorize(row.label.padEnd(labelWidth), colors.dim)}  ${row.value}`);
+    if (row.note) {
+      console.log(`  ${" ".repeat(labelWidth)}  ${colorize(row.note, colors.dim)}`);
+    }
+  }
+  console.log("");
+}
+
+function printTable(rows: Array<[string, string[]]>) {
   const width = rows.reduce((max, [label]) => Math.max(max, label.length), 0);
-  for (const [label, value] of rows) {
+  for (const [label, items] of rows) {
     const padded = label.padEnd(width, " ");
-    const renderedValue = value === "none"
-      ? colorize(value, colors.dim)
-      : colorize(value, colors.green);
-    console.log("  " + colorize(padded, colors.bold, colors.yellow) + "  " + renderedValue);
+    if (items.length === 0) {
+      console.log("  " + colorize(padded, colors.bold, colors.yellow) + "  " + colorize("none", colors.dim));
+    } else {
+      console.log("  " + colorize(padded, colors.bold, colors.yellow) + "  " + colorize(items[0], colors.green));
+      const indent = "  " + " ".repeat(width) + "  ";
+      for (const item of items.slice(1)) {
+        console.log(indent + colorize(item, colors.green));
+      }
+    }
   }
 }
 
@@ -442,10 +481,10 @@ function extractClaudeHooks(settings: Record<string, unknown> | undefined) {
           }
           const entry = hook as Record<string, unknown>;
           if (typeof entry.command === "string") {
-            return [eventName + " -> " + entry.command];
+            return [colorize(eventName, colors.cyan) + colors.green + " -> " + entry.command];
           }
           if (typeof entry.type === "string") {
-            return [eventName + " -> " + entry.type];
+            return [colorize(eventName, colors.cyan) + colors.green + " -> " + entry.type];
           }
           return [] as string[];
         });
@@ -496,12 +535,12 @@ function printClaudeForScope(scopeName: string, scopeRoot: string) {
 
   printScopeHeading(scopeName, scopeRoot);
   printTable([
-    ["Config", formatList([settingsPath].filter((path) => existsSync(path)))],
-    ["MCPs", formatList(unique(mcpSources.flatMap((source) => extractMcpNames(readJsonFile(source)))))],
-    ["Hooks", formatList(extractClaudeHooks(settings))],
-    ["Hook files", formatList(listFiles(hookRoot, () => true).map((path) => pathLabel(hookRoot, path)))],
-    ["Skills", formatList(extractSkills(skillRoot))],
-    ["Slash commands", formatList(extractClaudeCommands(commandRoots))],
+    ["Config", [settingsPath].filter((path) => existsSync(path))],
+    ["MCPs", unique(mcpSources.flatMap((source) => extractMcpNames(readJsonFile(source))))],
+    ["Hooks", extractClaudeHooks(settings)],
+    ["Hook files", listFiles(hookRoot, () => true).map((path) => pathLabel(hookRoot, path))],
+    ["Skills", extractSkills(skillRoot)],
+    ["Slash commands", extractClaudeCommands(commandRoots)],
   ]);
 }
 
@@ -514,12 +553,12 @@ function printCodexForScope(scopeName: string, scopeRoot: string) {
 
   printScopeHeading(scopeName, scopeRoot);
   printTable([
-    ["Config", formatList([configPath].filter((path) => existsSync(path)))],
-    ["Model", formatList(model)],
-    ["Personality", formatList(personality)],
-    ["MCPs", formatList(extractMcpNames(config))],
-    ["Hooks", formatList([])],
-    ["Skills", formatList(extractSkills(skillRoot))],
+    ["Config", [configPath].filter((path) => existsSync(path))],
+    ["Model", model],
+    ["Personality", personality],
+    ["MCPs", extractMcpNames(config)],
+    ["Hooks", []],
+    ["Skills", extractSkills(skillRoot)],
   ]);
 }
 
@@ -625,14 +664,14 @@ function getResourceChoices(): Choice<string>[] {
   ];
 }
 
-function normalizeHookCommand(command: string) {
-  const hookDir = join(HOME, ".claude", "hooks").replace(/\\/g, "/");
+function normalizeHookCommand(command: string, hookDir: string) {
+  const normalizedDir = hookDir.replace(/\\/g, "/");
   return command
-    .replace(/"\$CLAUDE_PROJECT_DIR"\/\.claude\/hooks\//g, hookDir + "/")
-    .replace(/\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\//g, hookDir + "/");
+    .replace(/"\$CLAUDE_PROJECT_DIR"\/\.claude\/hooks\//g, normalizedDir + "/")
+    .replace(/\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\//g, normalizedDir + "/");
 }
 
-function normalizeHookDefinition(definition: Record<string, unknown>) {
+function normalizeHookDefinition(definition: Record<string, unknown>, hookDir: string) {
   const clone = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
 
   for (const rules of Object.values(clone)) {
@@ -652,7 +691,7 @@ function normalizeHookDefinition(definition: Record<string, unknown>) {
         }
         const record = hook as Record<string, unknown>;
         if (typeof record.command === "string") {
-          record.command = normalizeHookCommand(record.command);
+          record.command = normalizeHookCommand(record.command, hookDir);
         }
       }
     }
@@ -718,8 +757,8 @@ function ensureSymlink(sourcePath: string, targetPath: string) {
   symlinkSync(sourcePath, targetPath);
 }
 
-function installCommands(selected: string[]) {
-  const targetRoot = join(HOME, ".claude", "commands");
+function installCommands(selected: string[], baseDir: string) {
+  const targetRoot = join(baseDir, ".claude", "commands");
   ensureDir(targetRoot);
 
   for (const relativePath of selected) {
@@ -728,12 +767,14 @@ function installCommands(selected: string[]) {
     ensureSymlink(sourcePath, targetPath);
   }
 
-  printSuccess("Symlinked " + selected.length + " command" + (selected.length === 1 ? "" : "s") + " into ~/.claude/commands");
+  printSuccess(`Symlinked ${selected.length} ${pluralize(selected.length, "command", "commands")} into ${targetRoot}`);
 }
 
-function installHooks(selected: string[]) {
+function installHooks(selected: string[], baseDir: string) {
   const catalog = getHookCatalog();
-  const settingsPath = join(HOME, ".claude", "settings.json");
+  const claudeDir = join(baseDir, ".claude");
+  const hooksDir = join(claudeDir, "hooks");
+  const settingsPath = join(claudeDir, "settings.json");
   const settings = readJsonFile(settingsPath) ?? {};
   const settingsRecord = settings as Record<string, unknown>;
   const hooksRecord = settingsRecord.hooks && typeof settingsRecord.hooks === "object"
@@ -748,9 +789,9 @@ function installHooks(selected: string[]) {
   const allow = Array.isArray(permissions.allow) ? permissions.allow as string[] : [];
   permissions.allow = allow;
 
-  ensureDir(join(HOME, ".claude", "hooks"));
+  ensureDir(hooksDir);
   for (const hookFile of listFiles(RESOURCE_HOOK_FILES_ROOT, () => true)) {
-    const targetPath = join(HOME, ".claude", "hooks", pathLabel(RESOURCE_HOOK_FILES_ROOT, hookFile));
+    const targetPath = join(hooksDir, pathLabel(RESOURCE_HOOK_FILES_ROOT, hookFile));
     ensureSymlink(hookFile, targetPath);
   }
 
@@ -760,7 +801,7 @@ function installHooks(selected: string[]) {
       continue;
     }
 
-    const normalizedHooks = normalizeHookDefinition(entry.hooks as Record<string, unknown>);
+    const normalizedHooks = normalizeHookDefinition(entry.hooks as Record<string, unknown>, hooksDir);
     for (const [eventName, rules] of Object.entries(normalizedHooks)) {
       if (!Array.isArray(rules)) {
         continue;
@@ -778,13 +819,13 @@ function installHooks(selected: string[]) {
   }
 
   writeJsonFile(settingsPath, settingsRecord);
-  printSuccess("Installed " + selected.length + " hook set" + (selected.length === 1 ? "" : "s") + " into ~/.claude with symlinked hook files");
+  printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "hook set", "hook sets")} into ${claudeDir} with symlinked hook files`);
 }
 
-function installSkills(selected: string[], target: "codex" | "claude" | "both") {
+function installSkills(selected: string[], target: "codex" | "claude" | "both", baseDir: string) {
   const roots = target === "both"
-    ? [join(HOME, ".codex", "skills"), join(HOME, ".claude", "skills")]
-    : [join(HOME, target === "codex" ? ".codex" : ".claude", "skills")];
+    ? [join(baseDir, ".codex", "skills"), join(baseDir, ".claude", "skills")]
+    : [join(baseDir, target === "codex" ? ".codex" : ".claude", "skills")];
 
   for (const root of roots) {
     ensureDir(root);
@@ -796,7 +837,7 @@ function installSkills(selected: string[], target: "codex" | "claude" | "both") 
   }
 
   const targetLabel = target === "both" ? "Codex and Claude" : target === "codex" ? "Codex" : "Claude";
-  printSuccess("Symlinked " + selected.length + " skill" + (selected.length === 1 ? "" : "s") + " into global " + targetLabel + " skills");
+  printSuccess(`Symlinked ${selected.length} ${pluralize(selected.length, "skill", "skills")} into ${targetLabel} skills at ${baseDir}`);
 }
 
 async function runAddWizard() {
@@ -804,8 +845,15 @@ async function runAddWizard() {
   console.log("");
   printSection("Add Wizard");
 
+  const location = await selectOne("Where do you want to install?", [
+    { value: "global", label: "Global", description: "Install into your home directory (~/.claude, ~/.codex)" },
+    { value: "cwd", label: "Current directory", description: "Install into " + process.cwd() + " (.claude, .codex)" },
+  ]);
+
+  const baseDir = location === "global" ? HOME : process.cwd();
+
   const selected = await selectMany(
-    "Select the resources you want to add globally:",
+    "Select the resources you want to add:",
     getResourceChoices(),
   );
 
@@ -819,23 +867,174 @@ async function runAddWizard() {
   const skills = selected.filter((value) => value.startsWith("skill:")).map((value) => value.slice("skill:".length));
 
   if (commands.length > 0) {
-    installCommands(commands);
+    installCommands(commands, baseDir);
   }
 
   if (hooks.length > 0) {
-    installHooks(hooks);
+    installHooks(hooks, baseDir);
   }
 
   if (skills.length > 0) {
     const target = await selectOne("Install selected skills for which agent?", [
-      { value: "codex", label: "Codex", description: "Install into ~/.codex/skills" },
-      { value: "claude", label: "Claude", description: "Install into ~/.claude/skills" },
-      { value: "both", label: "Both", description: "Install into both global skill directories" },
+      { value: "codex", label: "Codex", description: "Install into .codex/skills" },
+      { value: "claude", label: "Claude", description: "Install into .claude/skills" },
+      { value: "both", label: "Both", description: "Install into both skill directories" },
     ]);
-    installSkills(skills, target);
+    installSkills(skills, target, baseDir);
   }
 
   printSuccess("Wizard complete.");
+}
+
+function getInstalledHooks(baseDir: string): InstalledHook[] {
+  const settingsPath = join(baseDir, ".claude", "settings.json");
+  const settings = readJsonFile(settingsPath) ?? {};
+  const hooksRecord = settings.hooks && typeof settings.hooks === "object"
+    ? settings.hooks as Record<string, unknown>
+    : {};
+
+  const result: InstalledHook[] = [];
+  for (const [eventName, rules] of Object.entries(hooksRecord)) {
+    if (!Array.isArray(rules)) continue;
+    for (const rule of rules) {
+      if (!rule || typeof rule !== "object") continue;
+      const hookList = Array.isArray((rule as { hooks?: unknown[] }).hooks)
+        ? (rule as { hooks: unknown[] }).hooks
+        : [];
+      const desc = hookList.flatMap((hook) => {
+        if (!hook || typeof hook !== "object") return [];
+        const h = hook as Record<string, unknown>;
+        return typeof h.command === "string" ? [h.command] : typeof h.type === "string" ? [h.type] : [];
+      }).join(", ") || "(unknown)";
+      result.push({ eventName, label: eventName + " -> " + desc, rule });
+    }
+  }
+  return result;
+}
+
+function removeCommands(selected: string[], baseDir: string) {
+  const commandsDir = join(baseDir, ".claude", "commands");
+  for (const relativePath of selected) {
+    rmSync(join(commandsDir, relativePath), { force: true });
+  }
+  printSuccess(`Removed ${selected.length} ${pluralize(selected.length, "command", "commands")} from ${commandsDir}`);
+}
+
+function removeHookItems(items: InstalledHook[], baseDir: string) {
+  const claudeDir = join(baseDir, ".claude");
+  const settingsPath = join(claudeDir, "settings.json");
+  const settings = readJsonFile(settingsPath) ?? {};
+  const settingsRecord = settings as Record<string, unknown>;
+  const hooksRecord = settingsRecord.hooks && typeof settingsRecord.hooks === "object"
+    ? { ...(settingsRecord.hooks as Record<string, unknown>) }
+    : {};
+
+  for (const item of items) {
+    const existing = Array.isArray(hooksRecord[item.eventName]) ? hooksRecord[item.eventName] as unknown[] : [];
+    const removeKey = JSON.stringify(item.rule);
+    const filtered = existing.filter((v) => JSON.stringify(v) !== removeKey);
+    if (filtered.length === 0) {
+      delete hooksRecord[item.eventName];
+    } else {
+      hooksRecord[item.eventName] = filtered;
+    }
+  }
+
+  if (Object.keys(hooksRecord).length === 0) {
+    delete settingsRecord.hooks;
+  } else {
+    settingsRecord.hooks = hooksRecord;
+  }
+
+  writeJsonFile(settingsPath, settingsRecord);
+  printSuccess(`Removed ${items.length} ${pluralize(items.length, "hook", "hooks")} from ${claudeDir}`);
+}
+
+function removeSkills(selected: string[], baseDir: string) {
+  const roots = [join(baseDir, ".claude", "skills"), join(baseDir, ".codex", "skills")];
+  for (const root of roots) {
+    for (const skill of selected) {
+      rmSync(join(root, skill), { recursive: true, force: true });
+    }
+  }
+  printSuccess(`Removed ${selected.length} ${pluralize(selected.length, "skill", "skills")} from ${baseDir}`);
+}
+
+async function runRemoveWizard() {
+  printBanner();
+  console.log("");
+  printSection("Remove Wizard");
+
+  const location = await selectOne("Where do you want to remove from?", [
+    { value: "global", label: "Global", description: "Remove from your home directory (~/.claude, ~/.codex)" },
+    { value: "cwd", label: "Current directory", description: "Remove from " + process.cwd() + " (.claude, .codex)" },
+  ]);
+
+  const baseDir = location === "global" ? HOME : process.cwd();
+
+  const commandsDir = join(baseDir, ".claude", "commands");
+  const installedCommands = listFiles(commandsDir, (path) => [".md", ".txt"].includes(extname(path)))
+    .map((path) => pathLabel(commandsDir, path));
+
+  const installedSkills = unique([
+    ...extractSkills(join(baseDir, ".claude", "skills")),
+    ...extractSkills(join(baseDir, ".codex", "skills")),
+  ]);
+
+  const installedHooks = getInstalledHooks(baseDir);
+
+  const choices: Choice<string>[] = [
+    ...(installedCommands.length > 0
+      ? [
+          { value: "header:commands", label: "Commands", selectable: false } as Choice<string>,
+          ...installedCommands.map((path) => ({
+            value: "command:" + path,
+            label: commandLabel(join(commandsDir, path), commandsDir),
+            description: path,
+          })),
+        ]
+      : []),
+    ...(installedHooks.length > 0
+      ? [
+          { value: "header:hooks", label: "Hooks", selectable: false } as Choice<string>,
+          ...installedHooks.map((hook, i) => ({
+            value: "hook:" + i,
+            label: hook.label,
+          })),
+        ]
+      : []),
+    ...(installedSkills.length > 0
+      ? [
+          { value: "header:skills", label: "Skills", selectable: false } as Choice<string>,
+          ...installedSkills.map((skill) => ({
+            value: "skill:" + skill,
+            label: skill,
+          })),
+        ]
+      : []),
+  ];
+
+  if (choices.length === 0) {
+    printWarning("No resources found at the selected location.");
+    return;
+  }
+
+  const selected = await selectMany("Select resources to remove:", choices);
+
+  if (selected.length === 0) {
+    printWarning("No resources selected.");
+    return;
+  }
+
+  const commands = selected.filter((v) => v.startsWith("command:")).map((v) => v.slice("command:".length));
+  const hookIndices = selected.filter((v) => v.startsWith("hook:")).map((v) => parseInt(v.slice("hook:".length)));
+  const skills = selected.filter((v) => v.startsWith("skill:")).map((v) => v.slice("skill:".length));
+
+  if (commands.length > 0) removeCommands(commands, baseDir);
+  if (hookIndices.length > 0) removeHookItems(hookIndices.map((i) => installedHooks[i]!), baseDir);
+  if (skills.length > 0) removeSkills(skills, baseDir);
+
+  printSuccess("Remove complete.");
 }
 
 function printHelp() {
@@ -847,7 +1046,8 @@ function printHelp() {
   console.log("  " + colorize("setup", colors.bold) + "      Install deps and link eve globally");
   console.log("  " + colorize("doctor", colors.bold) + "     Show version, bin resolution, and repo diagnostics");
   console.log("  " + colorize("tools", colors.bold) + "      List AI tools from global and cwd config");
-  console.log("  " + colorize("add", colors.bold) + "        Wizard to install global commands, hooks, and skills from resources");
+  console.log("  " + colorize("add", colors.bold) + "        Wizard to install commands, hooks, and skills from resources");
+  console.log("  " + colorize("remove", colors.bold) + "     Wizard to remove installed commands, hooks, and skills");
   console.log("  " + colorize("help", colors.bold) + "       Show this help");
   console.log("");
   console.log("Examples:");
@@ -870,24 +1070,65 @@ function hasVersionFlag(args: string[]) {
 }
 
 function doctor() {
-  printBanner();
-  console.log("");
-
+  const packageJsonPresent = existsSync(resolve(REPO_ROOT, "package.json"));
+  const bunLockPresent = existsSync(resolve(REPO_ROOT, "bun.lock"));
+  const nodeModulesPresent = existsSync(resolve(REPO_ROOT, "node_modules"));
   const bunVersion = runCommand(["bun", "--version"], { allowFailure: true, quiet: true });
-  const whichEve = runCommand(["which", "eve"], { allowFailure: true, quiet: true });
-  const gitStatus = runCommand(["git", "status", "--short"], { allowFailure: true, quiet: true });
-  const packagePresent = Bun.file(resolve(REPO_ROOT, "package.json")).size > 0;
+  const bunPath = runCommand(["which", "bun"], { allowFailure: true, quiet: true });
+  const nodePath = runCommand(["which", "node"], { allowFailure: true, quiet: true });
+  const linkedEve = runCommand(["which", "eve"], { allowFailure: true, quiet: true });
+  const allLinkedEve = runCommand(["which", "-a", "eve"], { allowFailure: true, quiet: true });
+  const shellPath = process.env.SHELL ?? "unknown";
+  const pathEntries = (process.env.PATH ?? "").split(":").filter(Boolean);
+  const packageJson = readJsonFile(resolve(REPO_ROOT, "package.json")) as { name?: string; version?: string; bin?: Record<string, string> } | undefined;
+  const expectedEntrypoint = resolve(REPO_ROOT, packageJson?.bin?.eve ?? "src/cli.ts");
 
-  printCheck("eve version", VERSION);
-  printCheck("repo root", REPO_ROOT);
-  printCheck("bun version", bunVersion.exitCode === 0 ? bunVersion.stdout.trim() : "bun is not available on PATH", bunVersion.exitCode === 0 ? "ok" : "warn");
-  printCheck("eve bin", whichEve.exitCode === 0 ? whichEve.stdout.trim() : "not linked", whichEve.exitCode === 0 ? "ok" : "warn");
-  printCheck("git status", gitStatus.exitCode === 0 ? (gitStatus.stdout.trim() || "clean") : "unavailable", gitStatus.exitCode === 0 ? "ok" : "warn");
-  printCheck("package.json", packagePresent ? "present" : "missing", packagePresent ? "ok" : "warn");
+  const eveOnPath = linkedEve.exitCode === 0;
+  const bunOnPath = bunPath.exitCode === 0;
+  const eveResolvesFromBunBin = eveOnPath && linkedEve.stdout.includes("/.bun/bin/");
+  const allLines = allLinkedEve.stdout.split("\n").filter(Boolean);
+  const eveResolutionIncludesActive = eveOnPath && allLines.some((line) => line.trim() === linkedEve.stdout.trim());
 
-  const expectedBin = resolve(Bun.env.HOME ?? "", ".bun/bin/eve");
-  if (whichEve.exitCode !== 0 || whichEve.stdout.trim() !== expectedBin) {
-    printWarning("eve may need to be re linked with bun link from this repo.");
+  const environmentRows: DoctorRow[] = [
+    { label: "repo", value: REPO_ROOT, note: "Source checkout used for this eve install." },
+    { label: "package", value: packageJson?.name ?? "unknown", note: "Package name read from package.json." },
+    { label: "version", value: packageJson?.version ?? VERSION, note: "CLI version reported by this checkout." },
+    { label: "shell", value: shellPath, note: "Current shell environment." },
+    { label: "bun", value: bunVersion.exitCode === 0 ? bunVersion.stdout.trim() : colorize("not found", colors.red), note: "Bun version available to this process." },
+    { label: "bun path", value: bunPath.exitCode === 0 ? bunPath.stdout.trim() : colorize("not found", colors.red), note: "Resolved Bun executable used for install and link operations." },
+    { label: "node path", value: nodePath.exitCode === 0 ? nodePath.stdout.trim() : colorize("not found", colors.red), note: "Resolved Node executable on PATH." },
+    { label: "cwd", value: process.cwd(), note: "Directory where you ran `eve doctor`." },
+    { label: "entrypoint", value: expectedEntrypoint, note: "CLI script configured as the eve executable target." },
+    { label: "linked eve", value: linkedEve.exitCode === 0 ? linkedEve.stdout.trim() : colorize("not found", colors.red), note: "Executable your shell will run when you type `eve`." },
+    { label: "PATH entries", value: String(pathEntries.length), note: "Number of directories currently searched for commands." },
+  ];
+
+  const resolutionRows: DoctorRow[] = allLinkedEve.stdout
+    ? allLinkedEve.stdout.split("\n").filter(Boolean).map((line, index) => ({
+        label: index === 0 ? "active lookup" : `fallback ${index}`,
+        value: line.trim() === linkedEve.stdout.trim() ? colorize(line, colors.green) : line,
+      }))
+    : [{ label: "active lookup", value: colorize("eve not found in PATH", colors.red) }];
+
+  const configurationRows: DoctorRow[] = [
+    { label: "package.json present", value: doctorStatus(packageJsonPresent) },
+    { label: "bun.lock present", value: doctorStatus(bunLockPresent) },
+    { label: "node_modules present", value: doctorStatus(nodeModulesPresent) },
+    { label: "eve on PATH", value: doctorStatus(eveOnPath) },
+    { label: "bun on PATH", value: doctorStatus(bunOnPath) },
+    { label: "eve resolves from bun bin", value: doctorStatus(eveResolvesFromBunBin) },
+    { label: "active eve appears in resolution list", value: doctorStatus(eveResolutionIncludesActive) },
+  ];
+
+  console.log(colorize("eve doctor", colors.bold, colors.cyan));
+  console.log("");
+  printDoctorSection("Environment Snapshot", environmentRows);
+  printDoctorSection("eve Resolution", resolutionRows);
+  printDoctorSection("Expected Configuration", configurationRows);
+
+  if (!eveOnPath) {
+    console.log("suggestion:");
+    console.log("  Run `eve setup` from this repository to install dependencies and register the command.");
   }
 }
 
@@ -925,6 +1166,9 @@ export async function runCli(args: string[]) {
         return 0;
       case "add":
         await runAddWizard();
+        return 0;
+      case "remove":
+        await runRemoveWizard();
         return 0;
       case "help":
         printHelp();
