@@ -1,0 +1,8 @@
+{
+  "name": "Chrome DevTools MCP",
+  "description": "Control Chrome browser via DevTools protocol",
+  "config": {
+    "command": "npx",
+    "args": ["-y", "chrome-devtools-mcp@latest"]
+  }
+}

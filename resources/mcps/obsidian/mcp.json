@@ -1,0 +1,8 @@
+{
+  "name": "Obsidian MCP",
+  "description": "Connect to Obsidian vault (update path after install)",
+  "config": {
+    "command": "node",
+    "args": ["/path/to/obsidian-mcp/dist/server.js"]
+  }
+}

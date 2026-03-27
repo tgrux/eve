@@ -17,6 +17,7 @@ const REPO_ROOT = resolve(import.meta.dir, "..");
 const RESOURCES_ROOT = join(REPO_ROOT, "resources");
 const RESOURCE_COMMANDS_ROOT = join(RESOURCES_ROOT, "commands");
 const RESOURCE_HOOK_FILES_ROOT = join(RESOURCES_ROOT, "hooks");
+const RESOURCE_MCPS_ROOT = join(RESOURCES_ROOT, "mcps");
 const RESOURCE_SKILLS_ROOT = join(RESOURCES_ROOT, "skills");
 const HOME = homedir();
 const BANNER_LINES = [
@@ -65,10 +66,17 @@ type HookCatalogEntry = {
   hooks?: Record<string, unknown>;
 };
 
+type McpCatalogEntry = {
+  name?: string;
+  description?: string;
+  config: Record<string, unknown>;
+};
+
 type InstalledHook = {
   eventName: string;
   label: string;
   rule: unknown;
+  folderKey?: string;
 };
 
 type DoctorRow = {
@@ -641,6 +649,73 @@ function getHookChoices(): Choice<string>[] {
   }));
 }
 
+function getMcpCatalog() {
+  if (!existsSync(RESOURCE_MCPS_ROOT)) return {} as Record<string, McpCatalogEntry>;
+  const catalog: Record<string, McpCatalogEntry> = {};
+  for (const entry of readdirSync(RESOURCE_MCPS_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const mcpJson = readJsonFile(join(RESOURCE_MCPS_ROOT, entry.name, "mcp.json")) as McpCatalogEntry | undefined;
+    if (mcpJson?.config) catalog[entry.name] = mcpJson;
+  }
+  return catalog;
+}
+
+function getMcpChoices(): Choice<string>[] {
+  const catalog = getMcpCatalog();
+  return Object.entries(catalog).map(([key, value]) => ({
+    value: key,
+    label: value.name ?? key,
+    description: value.description,
+  }));
+}
+
+function getMcpFile(baseDir: string) {
+  return baseDir === HOME ? join(HOME, ".claude.json") : join(baseDir, ".mcp.json");
+}
+
+function getInstalledMcpKeys(baseDir: string): string[] {
+  const config = readJsonFile(getMcpFile(baseDir)) ?? {};
+  const servers = config.mcpServers;
+  if (!servers || typeof servers !== "object") return [];
+  return Object.keys(servers as Record<string, unknown>).sort();
+}
+
+function installMcps(selected: string[], baseDir: string) {
+  const catalog = getMcpCatalog();
+  const mcpFile = getMcpFile(baseDir);
+  const config = readJsonFile(mcpFile) ?? {};
+  const configRecord = config as Record<string, unknown>;
+  const servers = configRecord.mcpServers && typeof configRecord.mcpServers === "object"
+    ? configRecord.mcpServers as Record<string, unknown>
+    : {};
+  configRecord.mcpServers = servers;
+
+  for (const key of selected) {
+    const entry = catalog[key];
+    if (entry?.config) servers[key] = entry.config;
+  }
+
+  writeJsonFile(mcpFile, configRecord);
+  printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} into ${mcpFile}`);
+}
+
+function removeMcps(selected: string[], baseDir: string) {
+  const mcpFile = getMcpFile(baseDir);
+  const config = readJsonFile(mcpFile) ?? {};
+  const configRecord = config as Record<string, unknown>;
+  const servers = configRecord.mcpServers && typeof configRecord.mcpServers === "object"
+    ? configRecord.mcpServers as Record<string, unknown>
+    : {};
+
+  for (const key of selected) {
+    delete servers[key];
+  }
+
+  configRecord.mcpServers = servers;
+  writeJsonFile(mcpFile, configRecord);
+  printSuccess(`Removed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} from ${mcpFile}`);
+}
+
 function getResourceChoices(): Choice<string>[] {
   const commandChoices = getCommandChoices().map((choice) => ({
     value: "command:" + choice.value,
@@ -649,6 +724,11 @@ function getResourceChoices(): Choice<string>[] {
   }));
   const hookChoices = getHookChoices().map((choice) => ({
     value: "hook:" + choice.value,
+    label: choice.label,
+    description: choice.description,
+  }));
+  const mcpChoices = getMcpChoices().map((choice) => ({
+    value: "mcp:" + choice.value,
     label: choice.label,
     description: choice.description,
   }));
@@ -662,6 +742,8 @@ function getResourceChoices(): Choice<string>[] {
     ...commandChoices,
     { value: "header:hooks", label: "Hooks", selectable: false },
     ...hookChoices,
+    { value: "header:mcps", label: "MCP Servers (Claude only)", selectable: false },
+    ...mcpChoices,
     { value: "header:skills", label: "Skills", selectable: false },
     ...skillChoices,
   ];
@@ -867,15 +949,12 @@ async function runAddWizard() {
 
   const commands = selected.filter((value) => value.startsWith("command:")).map((value) => value.slice("command:".length));
   const hooks = selected.filter((value) => value.startsWith("hook:")).map((value) => value.slice("hook:".length));
+  const mcps = selected.filter((value) => value.startsWith("mcp:")).map((value) => value.slice("mcp:".length));
   const skills = selected.filter((value) => value.startsWith("skill:")).map((value) => value.slice("skill:".length));
 
-  if (commands.length > 0) {
-    installCommands(commands, baseDir);
-  }
-
-  if (hooks.length > 0) {
-    installHooks(hooks, baseDir);
-  }
+  if (commands.length > 0) installCommands(commands, baseDir);
+  if (hooks.length > 0) installHooks(hooks, baseDir);
+  if (mcps.length > 0) installMcps(mcps, baseDir);
 
   if (skills.length > 0) {
     const target = await selectOne("Install selected skills for which agent?", [
@@ -895,6 +974,18 @@ function getInstalledHooks(baseDir: string): InstalledHook[] {
   const hooksRecord = settings.hooks && typeof settings.hooks === "object"
     ? settings.hooks as Record<string, unknown>
     : {};
+  const hooksDir = join(baseDir, ".claude", "hooks");
+
+  // Build a reverse map from normalized rule JSON → catalog folder key
+  const ruleToFolderKey = new Map<string, string>();
+  for (const [key, entry] of Object.entries(getHookCatalog())) {
+    if (!entry.hooks || typeof entry.hooks !== "object") continue;
+    const normalized = normalizeHookDefinition(entry.hooks as Record<string, unknown>, hooksDir);
+    for (const rules of Object.values(normalized)) {
+      if (!Array.isArray(rules)) continue;
+      for (const rule of rules) ruleToFolderKey.set(JSON.stringify(rule), key);
+    }
+  }
 
   const result: InstalledHook[] = [];
   for (const [eventName, rules] of Object.entries(hooksRecord)) {
@@ -909,7 +1000,8 @@ function getInstalledHooks(baseDir: string): InstalledHook[] {
         const h = hook as Record<string, unknown>;
         return typeof h.command === "string" ? [h.command] : typeof h.type === "string" ? [h.type] : [];
       }).join(", ") || "(unknown)";
-      result.push({ eventName, label: eventName + " -> " + desc, rule });
+      const folderKey = ruleToFolderKey.get(JSON.stringify(rule));
+      result.push({ eventName, label: eventName + " -> " + desc, rule, folderKey });
     }
   }
   return result;
@@ -950,6 +1042,14 @@ function removeHookItems(items: InstalledHook[], baseDir: string) {
   }
 
   writeJsonFile(settingsPath, settingsRecord);
+
+  // Remove symlinked hook folders for catalog-managed hooks (deduplicated)
+  const hooksDir = join(claudeDir, "hooks");
+  const foldersToRemove = new Set(items.map((i) => i.folderKey).filter(Boolean) as string[]);
+  for (const key of foldersToRemove) {
+    rmSync(join(hooksDir, key), { recursive: true, force: true });
+  }
+
   printSuccess(`Removed ${items.length} ${pluralize(items.length, "hook", "hooks")} from ${claudeDir}`);
 }
 
@@ -985,6 +1085,7 @@ async function runRemoveWizard() {
   ]);
 
   const installedHooks = getInstalledHooks(baseDir);
+  const installedMcps = getInstalledMcpKeys(baseDir);
 
   const choices: Choice<string>[] = [
     ...(installedCommands.length > 0
@@ -1003,6 +1104,15 @@ async function runRemoveWizard() {
           ...installedHooks.map((hook, i) => ({
             value: "hook:" + i,
             label: hook.label,
+          })),
+        ]
+      : []),
+    ...(installedMcps.length > 0
+      ? [
+          { value: "header:mcps", label: "MCP Servers (Claude only)", selectable: false } as Choice<string>,
+          ...installedMcps.map((key) => ({
+            value: "mcp:" + key,
+            label: key,
           })),
         ]
       : []),
@@ -1031,10 +1141,12 @@ async function runRemoveWizard() {
 
   const commands = selected.filter((v) => v.startsWith("command:")).map((v) => v.slice("command:".length));
   const hookIndices = selected.filter((v) => v.startsWith("hook:")).map((v) => parseInt(v.slice("hook:".length)));
+  const mcps = selected.filter((v) => v.startsWith("mcp:")).map((v) => v.slice("mcp:".length));
   const skills = selected.filter((v) => v.startsWith("skill:")).map((v) => v.slice("skill:".length));
 
   if (commands.length > 0) removeCommands(commands, baseDir);
   if (hookIndices.length > 0) removeHookItems(hookIndices.map((i) => installedHooks[i]!), baseDir);
+  if (mcps.length > 0) removeMcps(mcps, baseDir);
   if (skills.length > 0) removeSkills(skills, baseDir);
 
   printSuccess("Remove complete.");
