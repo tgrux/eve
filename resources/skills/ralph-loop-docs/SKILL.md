@@ -323,20 +323,30 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
   echo "Error: ANTHROPIC_API_KEY is not set"
   exit 1
 fi
+if [[ ! "$ANTHROPIC_API_KEY" =~ ^sk-ant-[A-Za-z0-9_-]{20,}$ ]]; then
+  echo "Error: ANTHROPIC_API_KEY does not look like a valid Anthropic key (expected sk-ant- followed by 20+ alphanumeric characters)"
+  exit 1
+fi
  
-trap 'echo ""; echo "Interrupted."; kill 0; exit 1' INT TERM
- 
+events_file=$(mktemp)
+trap 'echo ""; echo "Interrupted."; rm -f "$events_file"; kill 0; exit 1' INT TERM
+
+if command -v eve &>/dev/null; then
+  eve tools
+  echo ""
+fi
+
 total_cost=0
- 
+
 for ((i=1; i<=$1; i++)); do
   echo ""
   echo "=== Iteration $i / $1 ==="
- 
-  events_file=$(mktemp)
+
+  : > "$events_file"
   start_time=$(date +%s)
- 
+
   echo "Starting Claude... (this may take a moment)"
- 
+
   seen_assistant=0
   claude \
     --output-format stream-json --verbose --permission-mode acceptEdits -p "@ai-specs/ralph.md @ai-specs/pin.md \
@@ -358,34 +368,54 @@ If all milestones are complete, output RALPH_COMPLETE." 2>"$stderr_dest" | \
         ;;
     esac
   done
- 
-  cost=$(tail -1 "$events_file" | jq -r '.total_cost_usd' 2>/dev/null || echo "0")
-  result_text=$(tail -1 "$events_file" | jq -r '.result' 2>/dev/null || echo "")
+  claude_exit=${PIPESTATUS[0]}
+  if [ "$claude_exit" -ne 0 ]; then
+    echo "Error: claude exited with code $claude_exit" >&2
+    rm -f "$events_file"
+    exit "$claude_exit"
+  fi
+
+  last_event=$(tail -1 "$events_file")
+  if event_parsed=$(echo "$last_event" | jq -r '(.total_cost_usd // "0"), (.result // "")' 2>/dev/null); then
+    cost=$(printf '%s\n' "$event_parsed" | head -1)
+    result_text=$(printf '%s\n' "$event_parsed" | tail -n +2)
+  else
+    echo "Warning: could not parse final event from events file" >&2
+    cost="0"
+    result_text=""
+  fi
   total_cost=$(echo "$total_cost + $cost" | bc)
   end_time=$(date +%s)
   elapsed=$(( end_time - start_time ))
   minutes=$(( elapsed / 60 ))
   seconds=$(( elapsed % 60 ))
- 
+
   echo ""
   echo "--- Cost: \$$cost | Running total: \$$total_cost | Duration: ${minutes}m ${seconds}s ---"
- 
-  rm "$events_file"
- 
+
   # Append cost and duration to the most recently modified completion file
   latest_complete=$(ls -t ai-specs/completed/*-complete.md 2>/dev/null | head -1)
   if [ -n "$latest_complete" ]; then
     echo "- **Cost:** \$$cost" >> "$latest_complete"
     echo "- **Execution time:** ${minutes}m ${seconds}s" >> "$latest_complete"
-    git add "$latest_complete" && git commit -m "Add run metadata to $(basename "$latest_complete")" --no-verify 2>/dev/null || true
+    complete_name=$(basename "$latest_complete")
+    git_out=$(git add "$latest_complete" 2>&1) || {
+      echo "Warning: git add failed for $complete_name: $git_out" >&2
+    }
+    git_out=$(git commit -m "Add run metadata to $complete_name" --no-verify 2>&1) || {
+      echo "Warning: git commit failed for $complete_name: $git_out" >&2
+    }
   fi
- 
+
   if echo "$result_text" | grep -q "RALPH_COMPLETE"; then
     echo ""
     echo "All milestones complete after $i iterations."
+    rm -f "$events_file"
     exit 0
   fi
 done
+
+rm -f "$events_file"
  
 echo ""
 echo "Reached $1 iterations. Total cost: \$$total_cost"
@@ -407,7 +437,16 @@ For Docker execution, replace the `claude \` command block with a `docker run` i
 If all milestones are complete, output RALPH_COMPLETE." 2>"$stderr_dest" | \
 ```
  
-Add `IMAGE="ralph-sandbox"` near the top. Note: Stop hooks configured on the host machine will **not** fire inside the Docker container — only hooks installed within the container image will run.
+Add `IMAGE="ralph-sandbox"` near the top, and add an image existence check after the API key validation:
+
+```bash
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+  echo "Error: Docker image '$IMAGE' not found. Build it first: docker build -t $IMAGE ai-ralph/"
+  exit 1
+fi
+```
+
+Note: Stop hooks configured on the host machine will **not** fire inside the Docker container — only hooks installed within the container image will run.
  
 ### 2F–2G: Docker-only files (skip for local execution)
  
