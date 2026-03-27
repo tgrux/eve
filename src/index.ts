@@ -17,7 +17,6 @@ const REPO_ROOT = resolve(import.meta.dir, "..");
 const RESOURCES_ROOT = join(REPO_ROOT, "resources");
 const RESOURCE_COMMANDS_ROOT = join(RESOURCES_ROOT, "commands");
 const RESOURCE_HOOK_FILES_ROOT = join(RESOURCES_ROOT, "hooks");
-const RESOURCE_HOOK_SETTINGS_PATH = join(RESOURCES_ROOT, "settings", "hooks.json");
 const RESOURCE_SKILLS_ROOT = join(RESOURCES_ROOT, "skills");
 const HOME = homedir();
 const BANNER_LINES = [
@@ -623,10 +622,14 @@ function getSkillChoices(): Choice<string>[] {
 }
 
 function getHookCatalog() {
-  const raw = readJsonFile(RESOURCE_HOOK_SETTINGS_PATH) ?? {};
-  return Object.fromEntries(
-    Object.entries(raw).filter(([key]) => !key.startsWith("_")),
-  ) as Record<string, HookCatalogEntry>;
+  if (!existsSync(RESOURCE_HOOK_FILES_ROOT)) return {} as Record<string, HookCatalogEntry>;
+  const catalog: Record<string, HookCatalogEntry> = {};
+  for (const entry of readdirSync(RESOURCE_HOOK_FILES_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const hookJson = readJsonFile(join(RESOURCE_HOOK_FILES_ROOT, entry.name, "hook.json")) as HookCatalogEntry | undefined;
+    if (hookJson) catalog[entry.name] = hookJson;
+  }
+  return catalog;
 }
 
 function getHookChoices(): Choice<string>[] {
@@ -790,9 +793,9 @@ function installHooks(selected: string[], baseDir: string) {
   permissions.allow = allow;
 
   ensureDir(hooksDir);
-  for (const hookFile of listFiles(RESOURCE_HOOK_FILES_ROOT, () => true)) {
-    const targetPath = join(hooksDir, pathLabel(RESOURCE_HOOK_FILES_ROOT, hookFile));
-    ensureSymlink(hookFile, targetPath);
+
+  for (const key of selected) {
+    ensureSymlink(join(RESOURCE_HOOK_FILES_ROOT, key), join(hooksDir, key));
   }
 
   for (const key of selected) {

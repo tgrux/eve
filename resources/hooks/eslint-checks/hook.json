@@ -1,0 +1,17 @@
+{
+  "name": "ESLint Linting",
+  "description": "Run ESLint after editing JS/TS files",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/eslint-checks/eslint-hook.js"
+          }
+        ]
+      }
+    ]
+  }
+}

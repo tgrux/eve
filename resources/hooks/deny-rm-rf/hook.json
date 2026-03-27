@@ -1,0 +1,16 @@
+{
+  "name": "Deny rm -rf",
+  "description": "Block destructive rm -rf commands before they run",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/deny-rm-rf/deny-rm-rf.py"
+          }
+        ]
+      }
+    ]
+  }
+}

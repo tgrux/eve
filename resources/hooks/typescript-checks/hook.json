@@ -1,0 +1,17 @@
+{
+  "name": "TypeScript Type Checking",
+  "description": "Run tsc type checking after editing TypeScript files",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/typescript-checks/tsc-slim.js"
+          }
+        ]
+      }
+    ]
+  }
+}
