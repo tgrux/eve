@@ -302,129 +302,19 @@ The bash script lives in ai-ralph/ but is designed to be run from the project ro
  
 The script parses stream-json output from Claude Code, displaying both agent output and any stop-hook output (e.g., linting tools like Zenable). Stop hooks inject their output as `user` type events in the stream — the `seen_assistant` flag distinguishes these from the initial prompt submission.
  
-**Local execution template:**
- 
+**Local execution:** Copy `.claude/skills/ralph-loop-docs/references/ralph.sh` to `ai-ralph/ralph.sh` and make it executable (`chmod +x ai-ralph/ralph.sh`). This script is ready to use as-is for local execution.
+
+**Dockerized execution adaptation:** To run inside Docker instead, add `IMAGE="ralph-sandbox"` near the top of the script, add an image existence check after the API key validation:
+
 ```bash
-#!/bin/bash
-set -e
- 
-if [ -z "$1" ]; then
-  echo "Usage: $0 <iterations> [--verbose]"
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+  echo "Error: Docker image '$IMAGE' not found. Build it first: docker build -t $IMAGE ai-ralph/"
   exit 1
 fi
- 
-if [ "$2" = "--verbose" ]; then
-  stderr_dest=/dev/stderr
-else
-  stderr_dest=/dev/null
-fi
- 
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-  echo "Error: ANTHROPIC_API_KEY is not set"
-  exit 1
-fi
-if [[ ! "$ANTHROPIC_API_KEY" =~ ^sk-ant-[A-Za-z0-9_-]{20,}$ ]]; then
-  echo "Error: ANTHROPIC_API_KEY does not look like a valid Anthropic key (expected sk-ant- followed by 20+ alphanumeric characters)"
-  exit 1
-fi
- 
-events_file=$(mktemp)
-trap 'echo ""; echo "Interrupted."; rm -f "$events_file"; kill 0; exit 1' INT TERM
-
-if command -v eve &>/dev/null; then
-  eve tools
-  echo ""
-fi
-
-total_cost=0
-
-for ((i=1; i<=$1; i++)); do
-  echo ""
-  echo "=== Iteration $i / $1 ==="
-
-  : > "$events_file"
-  start_time=$(date +%s)
-
-  echo "Starting Claude... (this may take a moment)"
-
-  seen_assistant=0
-  claude \
-    --output-format stream-json --verbose --permission-mode acceptEdits -p "@ai-specs/ralph.md @ai-specs/pin.md \
-    Follow the instructions in ai-specs/ralph.md. ONLY WORK ON A SINGLE MILESTONE. \
-If all milestones are complete, output RALPH_COMPLETE." 2>"$stderr_dest" | \
-  while IFS= read -r line; do
-    echo "$line" >> "$events_file"
-    type=$(echo "$line" | jq -r '.type' 2>/dev/null)
-    case "$type" in
-      assistant)
-        seen_assistant=1
-        echo "$line" | jq -r '.message.content[]? | select(.type == "text") | .text' 2>/dev/null
-        echo "$line" | jq -r '.message.content[]? | select(.type == "tool_use") | "[tool] \(.name)"' 2>/dev/null
-        ;;
-      user)
-        if [ "$seen_assistant" -eq 1 ]; then
-          echo "$line" | jq -r '.message.content[]? | select(.type == "text") | "[zenable] \(.text)"' 2>/dev/null
-        fi
-        ;;
-    esac
-  done
-  claude_exit=${PIPESTATUS[0]}
-  if [ "$claude_exit" -ne 0 ]; then
-    echo "Error: claude exited with code $claude_exit" >&2
-    rm -f "$events_file"
-    exit "$claude_exit"
-  fi
-
-  last_event=$(tail -1 "$events_file")
-  if event_parsed=$(echo "$last_event" | jq -r '(.total_cost_usd // "0"), (.result // "")' 2>/dev/null); then
-    cost=$(printf '%s\n' "$event_parsed" | head -1)
-    result_text=$(printf '%s\n' "$event_parsed" | tail -n +2)
-  else
-    echo "Warning: could not parse final event from events file" >&2
-    cost="0"
-    result_text=""
-  fi
-  total_cost=$(echo "$total_cost + $cost" | bc)
-  end_time=$(date +%s)
-  elapsed=$(( end_time - start_time ))
-  minutes=$(( elapsed / 60 ))
-  seconds=$(( elapsed % 60 ))
-
-  echo ""
-  echo "--- Cost: \$$cost | Running total: \$$total_cost | Duration: ${minutes}m ${seconds}s ---"
-
-  # Append cost and duration to the most recently modified completion file
-  latest_complete=$(ls -t ai-specs/completed/*-complete.md 2>/dev/null | head -1)
-  if [ -n "$latest_complete" ]; then
-    echo "- **Cost:** \$$cost" >> "$latest_complete"
-    echo "- **Execution time:** ${minutes}m ${seconds}s" >> "$latest_complete"
-    complete_name=$(basename "$latest_complete")
-    git_out=$(git add "$latest_complete" 2>&1) || {
-      echo "Warning: git add failed for $complete_name: $git_out" >&2
-    }
-    git_out=$(git commit -m "Add run metadata to $complete_name" --no-verify 2>&1) || {
-      echo "Warning: git commit failed for $complete_name: $git_out" >&2
-    }
-  fi
-
-  if echo "$result_text" | grep -q "RALPH_COMPLETE"; then
-    echo ""
-    echo "All milestones complete after $i iterations."
-    rm -f "$events_file"
-    exit 0
-  fi
-done
-
-rm -f "$events_file"
- 
-echo ""
-echo "Reached $1 iterations. Total cost: \$$total_cost"
 ```
- 
-**Dockerized execution adaptation:**
- 
-For Docker execution, replace the `claude \` command block with a `docker run` invocation. The stream-json parsing and stop-hook detection remain identical:
- 
+
+Then replace the `claude \` command block with:
+
 ```bash
   docker run --rm \
     -v "$(pwd):/workspace" \
@@ -436,106 +326,24 @@ For Docker execution, replace the `claude \` command block with a `docker run` i
     Follow the instructions in ai-specs/ralph.md. ONLY WORK ON A SINGLE MILESTONE. \
 If all milestones are complete, output RALPH_COMPLETE." 2>"$stderr_dest" | \
 ```
- 
-Add `IMAGE="ralph-sandbox"` near the top, and add an image existence check after the API key validation:
-
-```bash
-if ! docker image inspect "$IMAGE" &>/dev/null; then
-  echo "Error: Docker image '$IMAGE' not found. Build it first: docker build -t $IMAGE ai-ralph/"
-  exit 1
-fi
-```
 
 Note: Stop hooks configured on the host machine will **not** fire inside the Docker container — only hooks installed within the container image will run.
  
 ### 2F–2G: Docker-only files (skip for local execution)
  
 #### 2F: Create ai-ralph/Dockerfile
- 
-The Dockerfile builds the container image that ralph.sh runs Claude Code inside. It installs Node.js, git, and the Claude Code CLI.
- 
-**Template:**
- 
-```dockerfile
-FROM node:22-slim
- 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends git ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
- 
-RUN npm install -g @anthropic-ai/claude-code
- 
-WORKDIR /workspace
- 
-ENTRYPOINT ["claude"]
-```
- 
-Build the image from the project root (one-time, or after updating the Dockerfile):
+
+Copy `.claude/skills/ralph-loop-docs/references/Dockerfile` to `ai-ralph/Dockerfile`. Build the image from the project root (one-time, or after updating the Dockerfile):
+
 ```bash
 docker build -t ralph-sandbox ai-ralph/
 ```
- 
+
 The image name `ralph-sandbox` must match the `IMAGE` variable in ralph.sh.
- 
+
 #### 2G: Create ai-ralph/ralph-how-to.md
- 
-A how-to file that lives alongside ralph.sh. It covers Colima setup, API key configuration, permissions, and how to run the loop.
- 
-**Template:**
- 
-```markdown
-# How to Run the Ralph Loop
- 
-This project uses Colima instead of Docker Desktop. The ralph.sh script runs Claude Code inside a Docker container for autonomous, isolated execution.
- 
-## Prerequisites
- 
-Colima is running. Verify:
-```bash
-colima status
-docker context use colima
-docker info
-```
- 
-Build the Docker image (one-time, from project root):
-```bash
-docker build -t ralph-sandbox ai-ralph/
-```
- 
-Set your API key — the container uses `ANTHROPIC_API_KEY` as an env var (no stored credentials like Docker Desktop sandbox):
-```bash
-echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
-source ~/.zshrc
-```
- 
-Make the script executable (one-time):
-```bash
-chmod +x ai-ralph/ralph.sh
-```
- 
-## Running
- 
-Always run from the project root so the Docker volume mount captures the full codebase:
-```bash
-./ai-ralph/ralph.sh 10
-```
- 
-The script runs up to the specified number of iterations. Each iteration works on a single milestone. The loop stops early if all milestones are complete.
- 
-## How it works
- 
-Claude runs isolated inside a container, edits files on your host via a volume mount, and commits using your git identity. The key differences from Docker Desktop sandbox:
- 
-| Docker Desktop sandbox | Colima equivalent |
-|---|---|
-| `docker sandbox run claude` | `docker run --rm -v ... ralph-sandbox` |
-| Auto-mounts current directory | `-v "$(pwd):/workspace"` |
-| Auto-injects `~/.gitconfig` | `-v "$HOME/.gitconfig:/root/.gitconfig:ro"` |
-| Uses stored Claude credentials | `-e ANTHROPIC_API_KEY=...` |
-| Proprietary sandbox image | Your own `Dockerfile` |
-```
- 
-Keep this file focused on setup and running. Don't duplicate information that lives in ralph.md or pin.md.
+
+Copy `.claude/skills/ralph-loop-docs/references/ralph-how-to.md` to `ai-ralph/ralph-how-to.md`. This covers Colima setup, API key configuration, permissions, and how to run the loop.
  
 ---
  
