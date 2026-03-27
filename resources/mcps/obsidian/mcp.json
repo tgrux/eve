@@ -3,6 +3,6 @@
   "description": "Connect to Obsidian vault (update path after install)",
   "config": {
     "command": "node",
-    "args": ["/path/to/obsidian-mcp/dist/server.js"]
+    "args": ["/Users/tim.giegel/Code/obsidian-mcp/dist/server.js"]
   }
 }

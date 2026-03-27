@@ -5,6 +5,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -244,7 +245,11 @@ function listFiles(root: string, matcher: (path: string) => boolean) {
 
     for (const entry of entries) {
       const fullPath = join(current, entry.name);
-      if (entry.isDirectory()) {
+      let isDir = entry.isDirectory();
+      if (!isDir && entry.isSymbolicLink()) {
+        try { isDir = statSync(fullPath).isDirectory(); } catch { /* broken symlink */ }
+      }
+      if (isDir) {
         walk(fullPath);
       } else if (matcher(fullPath)) {
         results.push(fullPath);
@@ -502,6 +507,20 @@ function extractClaudeHooks(settings: Record<string, unknown> | undefined) {
 
 function extractSkills(root: string) {
   return unique(listFiles(root, (path) => basename(path) === "SKILL.md").map((path) => pathLabel(root, dirname(path))));
+}
+
+function getInstalledSkillKeys(baseDir: string): string[] {
+  const roots = [join(baseDir, ".claude", "skills"), join(baseDir, ".codex", "skills")];
+  const seen = new Set<string>();
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    try {
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        if (entry.isDirectory() || entry.isSymbolicLink()) seen.add(entry.name);
+      }
+    } catch { /* ignore */ }
+  }
+  return [...seen].sort();
 }
 
 function extractClaudeCommands(roots: string[]) {
@@ -1079,10 +1098,7 @@ async function runRemoveWizard() {
   const installedCommands = listFiles(commandsDir, (path) => [".md", ".txt"].includes(extname(path)))
     .map((path) => pathLabel(commandsDir, path));
 
-  const installedSkills = unique([
-    ...extractSkills(join(baseDir, ".claude", "skills")),
-    ...extractSkills(join(baseDir, ".codex", "skills")),
-  ]);
+  const installedSkills = getInstalledSkillKeys(baseDir);
 
   const installedHooks = getInstalledHooks(baseDir);
   const installedMcps = getInstalledMcpKeys(baseDir);
