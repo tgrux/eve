@@ -151,6 +151,11 @@ function printDoctorSection(title: string, rows: DoctorRow[]) {
 }
 
 function printTable(rows: Array<[string, string[]]>) {
+  const anyDefined = rows.some(([, items]) => items.length > 0);
+  if (!anyDefined) {
+    console.log("  " + colorize("nothing defined", colors.dim));
+    return;
+  }
   const width = rows.reduce((max, [label]) => Math.max(max, label.length), 0);
   for (const [label, items] of rows) {
     const padded = label.padEnd(width, " ");
@@ -548,6 +553,7 @@ function printClaudeForScope(scopeName: string, scopeRoot: string) {
   const settingsPath = join(scopeRoot, ".claude", "settings.json");
   const settings = readJsonFile(settingsPath);
   const mcpSources = [
+    getMcpFile(scopeRoot),
     join(scopeRoot, ".mcp.json"),
     join(scopeRoot, ".claude", ".mcp.json"),
     join(scopeRoot, ".claude", "managed-mcp.json"),
@@ -564,7 +570,7 @@ function printClaudeForScope(scopeName: string, scopeRoot: string) {
     ["Config", [settingsPath].filter((path) => existsSync(path))],
     ["MCPs", unique(mcpSources.flatMap((source) => extractMcpNames(readJsonFile(source))))],
     ["Hooks", extractClaudeHooks(settings)],
-    ["Hook files", listFiles(hookRoot, () => true).map((path) => pathLabel(hookRoot, path))],
+    ["Hook files", listFiles(hookRoot, (path) => [".js", ".py", ".sh", ".ts"].includes(extname(path))).map((path) => pathLabel(hookRoot, path))],
     ["Skills", extractSkills(skillRoot)],
     ["Slash commands", extractClaudeCommands(commandRoots)],
   ]);
