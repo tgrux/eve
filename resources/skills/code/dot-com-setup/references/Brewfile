@@ -1,0 +1,29 @@
+# dot-com local development dependencies
+
+# Ruby
+brew "openssl"
+brew "libyaml"
+brew "libffi"
+brew "rbenv"
+brew "ruby-build"
+
+# Database
+brew "postgresql@18"
+brew "postgis"
+brew "redis"
+
+# Image processing
+brew "imagemagick"
+brew "vips"
+
+# Secrets
+brew "1password-cli"
+
+# Docker (via Colima, not Docker Desktop)
+brew "colima"
+brew "docker"
+brew "docker-buildx"
+brew "docker-compose"
+
+# Browser testing
+cask "chromedriver"
