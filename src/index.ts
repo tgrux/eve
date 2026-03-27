@@ -655,7 +655,7 @@ function getResourceChoices(): Choice<string>[] {
     description: "resources/skills/" + choice.value,
   }));
   return [
-    { value: "header:commands", label: "Commands", selectable: false },
+    { value: "header:commands", label: "Slash Commands (Claude only)", selectable: false },
     ...commandChoices,
     { value: "header:hooks", label: "Hooks", selectable: false },
     ...hookChoices,
@@ -986,7 +986,7 @@ async function runRemoveWizard() {
   const choices: Choice<string>[] = [
     ...(installedCommands.length > 0
       ? [
-          { value: "header:commands", label: "Commands", selectable: false } as Choice<string>,
+          { value: "header:commands", label: "Slash Commands (Claude only)", selectable: false } as Choice<string>,
           ...installedCommands.map((path) => ({
             value: "command:" + path,
             label: commandLabel(join(commandsDir, path), commandsDir),
