@@ -86,11 +86,19 @@ If all milestones are complete, output RALPH_COMPLETE." 2>"$stderr_dest" | \
   echo ""
   echo "--- Cost: \$$cost | Running total: \$$total_cost | Duration: ${minutes}m ${seconds}s ---"
 
-  # Append cost and duration to the most recently modified completion file
+  # Update the most recently modified completion file with actual run metadata
   latest_complete=$(ls -t ai-specs/completed/*-complete.md 2>/dev/null | head -1)
   if [ -n "$latest_complete" ]; then
-    echo "- **Cost:** \$$cost" >> "$latest_complete"
-    echo "- **Execution time:** ${minutes}m ${seconds}s" >> "$latest_complete"
+    zenable_count=$(grep -c 'Zenable AI Review' "$events_file" 2>/dev/null || echo "0")
+    if grep -q '## Run Metadata' "$latest_complete" 2>/dev/null; then
+      # Replace Claude's placeholder estimates with actual values
+      sed -i '' "s/\*\*Cost:\*\* .*/**Cost:** \$$cost/" "$latest_complete"
+      sed -i '' "s/\*\*Execution time:\*\* .*/**Execution time:** ${minutes}m ${seconds}s/" "$latest_complete"
+      sed -i '' "s/\*\*Zenable fixes:\*\* .*/**Zenable fixes:** $zenable_count/" "$latest_complete"
+    else
+      printf '\n## Run Metadata\n- **Cost:** $%s\n- **Execution time:** %dm %ds\n- **Zenable fixes:** %s\n' \
+        "$cost" "$minutes" "$seconds" "$zenable_count" >> "$latest_complete"
+    fi
     complete_name=$(basename "$latest_complete")
     git_out=$(git add "$latest_complete" 2>&1) || {
       echo "Warning: git add failed for $complete_name: $git_out" >&2
