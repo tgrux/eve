@@ -20,6 +20,7 @@ const RESOURCE_COMMANDS_ROOT = join(RESOURCES_ROOT, "commands");
 const RESOURCE_HOOK_FILES_ROOT = join(RESOURCES_ROOT, "hooks");
 const RESOURCE_MCPS_ROOT = join(RESOURCES_ROOT, "mcps");
 const RESOURCE_SKILLS_ROOT = join(RESOURCES_ROOT, "skills");
+const RESOURCE_PERMISSIONS_ROOT = join(RESOURCES_ROOT, "permissions");
 const HOME = homedir();
 const BANNER_LINES = [
   "+----------------------+",
@@ -741,7 +742,7 @@ function removeMcps(selected: string[], baseDir: string) {
   printSuccess(`Removed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} from ${mcpFile}`);
 }
 
-function getResourceChoices(): Choice<string>[] {
+function getResourceChoices(location: "global" | "cwd" = "global"): Choice<string>[] {
   const commandChoices = getCommandChoices().map((choice) => ({
     value: "command:" + choice.value,
     label: choice.label,
@@ -762,7 +763,7 @@ function getResourceChoices(): Choice<string>[] {
     label: choice.label,
     description: "resources/skills/" + choice.value,
   }));
-  return [
+  const choices: Choice<string>[] = [
     { value: "header:commands", label: "Slash Commands (Claude only)", selectable: false },
     ...commandChoices,
     { value: "header:hooks", label: "Hooks", selectable: false },
@@ -772,6 +773,13 @@ function getResourceChoices(): Choice<string>[] {
     { value: "header:skills", label: "Skills", selectable: false },
     ...skillChoices,
   ];
+  if (location === "cwd") {
+    choices.push(
+      { value: "header:permissions", label: "Permissions (cwd only)", selectable: false },
+      { value: "permission:base", label: "Base permissions", description: "Write base allow/deny rules to .claude/settings.json" },
+    );
+  }
+  return choices;
 }
 
 function normalizeHookCommand(command: string, hookDir: string) {
@@ -865,6 +873,41 @@ function ensureSymlink(sourcePath: string, targetPath: string) {
     rmSync(targetPath, { recursive: true, force: true });
   }
   symlinkSync(sourcePath, targetPath);
+}
+
+function installPermissions(baseDir: string) {
+  const sourcePath = join(RESOURCE_PERMISSIONS_ROOT, "base-permissions.json");
+  const claudeDir = join(baseDir, ".claude");
+  const settingsPath = join(claudeDir, "settings.json");
+
+  const source = readJsonFile(sourcePath) as Record<string, unknown> | null;
+  if (!source) {
+    printWarning("Could not read base-permissions.json");
+    return;
+  }
+
+  ensureDir(claudeDir);
+  const existing = (readJsonFile(settingsPath) ?? {}) as Record<string, unknown>;
+
+  // Merge top-level allow/deny arrays (dedup)
+  for (const key of ["allow", "deny"] as const) {
+    const src = Array.isArray(source[key]) ? source[key] as string[] : [];
+    const dst = Array.isArray(existing[key]) ? existing[key] as string[] : [];
+    existing[key] = [...new Set([...dst, ...src])];
+  }
+
+  // Merge env object (source keys win if missing in existing)
+  if (source.env && typeof source.env === "object") {
+    existing.env = { ...(source.env as Record<string, unknown>), ...(existing.env as Record<string, unknown> ?? {}) };
+  }
+
+  // Only set sandbox if not already present
+  if (!("sandbox" in existing) && "sandbox" in source) {
+    existing.sandbox = source.sandbox;
+  }
+
+  writeJsonFile(settingsPath, existing);
+  printSuccess(`Wrote permissions to ${settingsPath}`);
 }
 
 function installCommands(selected: string[], baseDir: string) {
@@ -964,7 +1007,7 @@ async function runAddWizard() {
 
   const selected = await selectMany(
     "Select the resources you want to add:",
-    getResourceChoices(),
+    getResourceChoices(location),
   );
 
   if (selected.length === 0) {
@@ -976,10 +1019,12 @@ async function runAddWizard() {
   const hooks = selected.filter((value) => value.startsWith("hook:")).map((value) => value.slice("hook:".length));
   const mcps = selected.filter((value) => value.startsWith("mcp:")).map((value) => value.slice("mcp:".length));
   const skills = selected.filter((value) => value.startsWith("skill:")).map((value) => value.slice("skill:".length));
+  const permissions = selected.filter((value) => value.startsWith("permission:"));
 
   if (commands.length > 0) installCommands(commands, baseDir);
   if (hooks.length > 0) installHooks(hooks, baseDir);
   if (mcps.length > 0) installMcps(mcps, baseDir);
+  if (permissions.length > 0) installPermissions(baseDir);
 
   if (skills.length > 0) {
     const target = await selectOne("Install selected skills for which agent?", [
