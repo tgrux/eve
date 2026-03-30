@@ -68,13 +68,9 @@ Create `ai-specs/archive/` if it doesn't exist. Write a single consolidated docu
 
 For each milestone being archived, move `ai-specs/specs/m#.md` to `ai-specs/archive/specs/m#.md`.
 
-### Step 4: Stub out completion summaries
+### Step 4: Delete completion summaries
 
-Replace each `ai-specs/completed/m#-complete.md` being archived with a one-line stub:
-
-```
-Archived — see ai-specs/archive/PHASE-[N]-SUMMARY.md
-```
+Delete each `ai-specs/completed/m#-complete.md` for the milestones being archived. Their content has been captured in the PHASE-[N]-SUMMARY.md.
 
 ### Step 5: Update the milestone table in ralph.md
 
@@ -100,8 +96,7 @@ ai-specs/
 │   └── m#.md (open only)
 ├── completed/
 │   ├── MILESTONE-COMPLETION-CHECKLIST.md   # Unchanged
-│   ├── m#-complete.md (open only)
-│   └── m#-complete.md → "Archived — see..."  (stubs for archived)
+│   └── m#-complete.md (open only — archived ones deleted)
 └── archive/
     ├── PHASE-[N]-SUMMARY.md   # Full history for archived milestones
     └── specs/
