@@ -346,7 +346,7 @@ The image name `ralph-sandbox` must match the `IMAGE` variable in ralph.sh.
 Copy `.claude/skills/ralph-loop-docs/references/ralph-how-to.md` to `ai-ralph/ralph-how-to.md`. This covers Colima setup, API key configuration, permissions, and how to run the loop.
  
 ---
- 
+
 ## Design Principles
  
 These principles emerged from real iteration on Ralph Loop documentation. They exist because violating them caused agent confusion, wasted context, or duplicated work.
@@ -371,3 +371,4 @@ The bash script detects completion by grepping for `RALPH_COMPLETE` in the agent
  
 ### Resume Over Restart
 Agent iterations can be interrupted (timeout, crash, context exhaustion). The workflow explicitly tells the agent to check for prior work before starting fresh. This prevents the agent from re-implementing code that already exists and passes tests.
+
