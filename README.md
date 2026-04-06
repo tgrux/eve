@@ -42,8 +42,22 @@ eve add           # Wizard to install global commands, hooks, and skills from re
 
 - `Commands` symlink markdown files from `resources/commands/` into `~/.claude/commands/`
 - `Hooks` symlink hook files from `resources/hooks/` into `~/.claude/hooks/` and merge selected hook definitions into `~/.claude/settings.json`
-- `Skills` symlink selected skill directories from `resources/skills/` into `~/.codex/skills/`, `~/.claude/skills/`, or both
+- `Skills` symlink selected skill directories from `resources/skills/` plus any configured extra skill roots into `~/.codex/skills/`, `~/.claude/skills/`, or both
 - Wizard controls: `↑/↓` move, `space` toggles items, `enter` confirms, `q` cancels
+
+## Extra Skill Roots
+
+`eve add` always includes built-in skills from `resources/skills/`. You can add more skill source directories by creating either `~/.config/eve/config.json` or `./.eve/config.json` with a `skillRoots` array.
+
+```json
+{
+  "skillRoots": [
+    "/Users/tim/Code/_tools/baymax/skills"
+  ]
+}
+```
+
+Relative paths are resolved from the directory containing the config file. Global and repo-local `skillRoots` are merged together.
 
 ## Uninstall
 

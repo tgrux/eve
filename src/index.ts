@@ -55,6 +55,10 @@ type AiToolsOptions = {
   agent?: "claude" | "codex";
 };
 
+type EveConfig = {
+  skillRoots: string[];
+};
+
 type Choice<T extends string> = {
   value: T;
   label: string;
@@ -85,6 +89,14 @@ type DoctorRow = {
   label: string;
   value: string;
   note?: string;
+};
+
+type SkillCatalogEntry = {
+  key: string;
+  skill: string;
+  sourceRoot: string;
+  sourcePath: string;
+  description: string;
 };
 
 function colorize(text: string, ...styles: string[]) {
@@ -280,6 +292,41 @@ function commandLabel(path: string, root: string) {
 
 function unique(items: string[]) {
   return [...new Set(items)].sort();
+}
+
+function getEveConfigPaths() {
+  const paths = [join(HOME, ".config", "eve", "config.json"), join(process.cwd(), ".eve", "config.json")];
+  return unique(paths);
+}
+
+function parseConfiguredPathArray(value: unknown, configPath: string) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+  return unique(
+    value.flatMap((entry) => {
+      if (typeof entry !== "string" || entry.trim().length === 0) {
+        return [] as string[];
+      }
+      return [resolve(dirname(configPath), entry.trim())];
+    }),
+  );
+}
+
+function readEveConfig(): EveConfig {
+  const skillRoots: string[] = [];
+
+  for (const configPath of getEveConfigPaths()) {
+    const config = readJsonFile(configPath);
+    if (!config) {
+      continue;
+    }
+    skillRoots.push(...parseConfiguredPathArray(config.skillRoots, configPath));
+  }
+
+  return {
+    skillRoots: unique(skillRoots),
+  };
 }
 
 function ensureDir(path: string) {
@@ -515,6 +562,37 @@ function extractSkills(root: string) {
   return unique(listFiles(root, (path) => basename(path) === "SKILL.md").map((path) => pathLabel(root, dirname(path))));
 }
 
+function formatSkillSourceDescription(root: string, skill: string) {
+  if (root === RESOURCE_SKILLS_ROOT) {
+    return "resources/skills/" + skill;
+  }
+  return join(root, skill).replace(/\\/g, "/");
+}
+
+function getSkillCatalog() {
+  const config = readEveConfig();
+  const roots = unique([RESOURCE_SKILLS_ROOT, ...config.skillRoots]);
+  const entries: SkillCatalogEntry[] = [];
+
+  for (const root of roots) {
+    for (const skill of extractSkills(root)) {
+      const sourcePath = join(root, skill);
+      entries.push({
+        key: JSON.stringify([root, skill]),
+        skill,
+        sourceRoot: root,
+        sourcePath,
+        description: formatSkillSourceDescription(root, skill),
+      });
+    }
+  }
+
+  return entries.sort((left, right) =>
+    left.skill.localeCompare(right.skill)
+    || left.sourceRoot.localeCompare(right.sourceRoot)
+  );
+}
+
 function getInstalledSkillKeys(baseDir: string): string[] {
   const roots = [join(baseDir, ".claude", "skills"), join(baseDir, ".codex", "skills")];
   const seen = new Set<string>();
@@ -649,9 +727,10 @@ function getCommandChoices(): Choice<string>[] {
 }
 
 function getSkillChoices(): Choice<string>[] {
-  return extractSkills(RESOURCE_SKILLS_ROOT).map((skill) => ({
-    value: skill,
-    label: skill,
+  return getSkillCatalog().map((entry) => ({
+    value: entry.key,
+    label: entry.skill,
+    description: entry.description,
   }));
 }
 
@@ -761,7 +840,7 @@ function getResourceChoices(location: "global" | "cwd" = "global"): Choice<strin
   const skillChoices = getSkillChoices().map((choice) => ({
     value: "skill:" + choice.value,
     label: choice.label,
-    description: "resources/skills/" + choice.value,
+    description: choice.description,
   }));
   const choices: Choice<string>[] = [
     { value: "header:commands", label: "Slash Commands (Claude only)", selectable: false },
@@ -975,7 +1054,16 @@ function installHooks(selected: string[], baseDir: string) {
   printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "hook set", "hook sets")} into ${claudeDir} with symlinked hook files`);
 }
 
-function installSkills(selected: string[], target: "codex" | "claude" | "both", baseDir: string) {
+function installSkills(selected: SkillCatalogEntry[], target: "codex" | "claude" | "both", baseDir: string) {
+  const duplicateSkillNames = selected
+    .map((entry) => entry.skill)
+    .filter((skill, index, all) => all.indexOf(skill) !== index);
+  if (duplicateSkillNames.length > 0) {
+    throw new CliError(
+      "Selected the same skill from multiple sources: " + unique(duplicateSkillNames).join(", ") + ". Choose one source per skill.",
+    );
+  }
+
   const roots = target === "both"
     ? [join(baseDir, ".codex", "skills"), join(baseDir, ".claude", "skills")]
     : [join(baseDir, target === "codex" ? ".codex" : ".claude", "skills")];
@@ -983,9 +1071,8 @@ function installSkills(selected: string[], target: "codex" | "claude" | "both", 
   for (const root of roots) {
     ensureDir(root);
     for (const skill of selected) {
-      const sourcePath = join(RESOURCE_SKILLS_ROOT, skill);
-      const targetPath = join(root, skill);
-      ensureSymlink(sourcePath, targetPath);
+      const targetPath = join(root, skill.skill);
+      ensureSymlink(skill.sourcePath, targetPath);
     }
   }
 
@@ -1018,8 +1105,13 @@ async function runAddWizard() {
   const commands = selected.filter((value) => value.startsWith("command:")).map((value) => value.slice("command:".length));
   const hooks = selected.filter((value) => value.startsWith("hook:")).map((value) => value.slice("hook:".length));
   const mcps = selected.filter((value) => value.startsWith("mcp:")).map((value) => value.slice("mcp:".length));
-  const skills = selected.filter((value) => value.startsWith("skill:")).map((value) => value.slice("skill:".length));
+  const skillKeys = selected.filter((value) => value.startsWith("skill:")).map((value) => value.slice("skill:".length));
   const permissions = selected.filter((value) => value.startsWith("permission:"));
+  const skillCatalog = getSkillCatalog();
+  const skills = skillKeys.flatMap((key) => {
+    const match = skillCatalog.find((entry) => entry.key === key);
+    return match ? [match] : [];
+  });
 
   if (commands.length > 0) installCommands(commands, baseDir);
   if (hooks.length > 0) installHooks(hooks, baseDir);
