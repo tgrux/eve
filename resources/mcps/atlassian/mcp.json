@@ -1,0 +1,8 @@
+{
+  "name": "Atlassian Rovo MCP",
+  "description": "Connect to Jira, Confluence, and Compass via Atlassian Rovo MCP Server",
+  "config": {
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/mcp"]
+  }
+}
