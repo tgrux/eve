@@ -3,7 +3,7 @@
     "type": "http",
     "url": "https://subtext.fullstory.com/mcp/devtools",
     "headers": {
-      "Authorization": "Bearer ${FULLSTORY-API-TOKEN}non"
+      "Authorization": "Bearer ${FULLSTORY_API_TOKEN}"
     }
   }
 }
