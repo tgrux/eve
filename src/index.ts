@@ -790,7 +790,7 @@ function getInstalledMcpKeys(baseDir: string): string[] {
   return Object.keys(servers as Record<string, unknown>).sort();
 }
 
-function installMcps(selected: string[], baseDir: string) {
+async function installMcps(selected: string[], baseDir: string) {
   const catalog = getMcpCatalog();
   const mcpFile = getMcpFile(baseDir);
   const config = readJsonFile(mcpFile) ?? {};
@@ -800,15 +800,36 @@ function installMcps(selected: string[], baseDir: string) {
     : {};
   configRecord.mcpServers = servers;
 
+  // Collect values for any ${VAR} placeholders found in HTTP MCP headers
+  const placeholderValues: Record<string, string> = {};
+  for (const key of selected) {
+    const entry = catalog[key];
+    if (entry?.config) continue;
+    for (const [, serverConfig] of Object.entries(entry)) {
+      if (typeof serverConfig !== "object" || serverConfig === null) continue;
+      const server = serverConfig as Record<string, unknown>;
+      if (server.type !== "http" || !server.headers) continue;
+      for (const headerVal of Object.values(server.headers as Record<string, string>)) {
+        for (const [, varName] of [...headerVal.matchAll(/\$\{([^}]+)\}/g)]) {
+          if (!(varName in placeholderValues)) {
+            placeholderValues[varName] = await prompt(`Enter value for ${varName}: `);
+          }
+        }
+      }
+    }
+  }
+
+  const substitute = (str: string) =>
+    str.replace(/\$\{([^}]+)\}/g, (_, v) => placeholderValues[v] ?? `\${${v}}`);
+
   for (const key of selected) {
     const entry = catalog[key];
     if (entry?.config) {
       servers[key] = entry.config;
     } else {
       for (const [serverKey, serverConfig] of Object.entries(entry)) {
-        if (serverKey !== "name" && serverKey !== "description") {
-          servers[serverKey] = serverConfig;
-        }
+        if (serverKey === "name" || serverKey === "description") continue;
+        servers[serverKey] = JSON.parse(substitute(JSON.stringify(serverConfig)));
       }
     }
   }
@@ -1128,7 +1149,7 @@ async function runAddWizard() {
 
   if (commands.length > 0) installCommands(commands, baseDir);
   if (hooks.length > 0) installHooks(hooks, baseDir);
-  if (mcps.length > 0) installMcps(mcps, baseDir);
+  if (mcps.length > 0) await installMcps(mcps, baseDir);
   if (permissions.length > 0) installPermissions(baseDir);
 
   if (skills.length > 0) {
