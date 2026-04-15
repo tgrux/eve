@@ -75,7 +75,8 @@ type HookCatalogEntry = {
 type McpCatalogEntry = {
   name?: string;
   description?: string;
-  config: Record<string, unknown>;
+  config?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 type InstalledHook = {
@@ -760,7 +761,11 @@ function getMcpCatalog() {
   for (const entry of readdirSync(RESOURCE_MCPS_ROOT, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const mcpJson = readJsonFile(join(RESOURCE_MCPS_ROOT, entry.name, "mcp.json")) as McpCatalogEntry | undefined;
-    if (mcpJson?.config) catalog[entry.name] = mcpJson;
+    if (!mcpJson) continue;
+    const isHttpMcp = !mcpJson.config && Object.values(mcpJson).some(
+      (v) => typeof v === "object" && v !== null && "type" in v && (v as Record<string, unknown>).type === "http"
+    );
+    if (mcpJson.config || isHttpMcp) catalog[entry.name] = mcpJson;
   }
   return catalog;
 }
@@ -797,7 +802,15 @@ function installMcps(selected: string[], baseDir: string) {
 
   for (const key of selected) {
     const entry = catalog[key];
-    if (entry?.config) servers[key] = entry.config;
+    if (entry?.config) {
+      servers[key] = entry.config;
+    } else {
+      for (const [serverKey, serverConfig] of Object.entries(entry)) {
+        if (serverKey !== "name" && serverKey !== "description") {
+          servers[serverKey] = serverConfig;
+        }
+      }
+    }
   }
 
   writeJsonFile(mcpFile, configRecord);
