@@ -1,9 +1,0 @@
-{
-  "session-review": {
-    "type": "http",
-    "url": "https://subtext.fullstory.com/mcp/session-review",
-    "headers": {
-      "Authorization": "Bearer ${FULLSTORY_API_TOKEN}"
-    }
-  }
-}
