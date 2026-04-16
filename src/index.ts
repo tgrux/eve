@@ -939,15 +939,28 @@ function installCodexMcps(resolvedEntries: Record<string, unknown>, baseDir: str
 }
 
 async function installMcps(selected: string[], baseDir: string) {
-  const resolvedEntries = await resolveMcpEntries(selected);
-  const claudePath = installClaudeMcps(resolvedEntries, baseDir);
-  const codexPath = installCodexMcps(resolvedEntries, baseDir);
-  printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} into ${claudePath} and ${codexPath}`);
+  const codexSelected = selected.filter((key) => key !== "slack");
+  const claudeEntries = await resolveMcpEntries(selected);
+  const claudePath = installClaudeMcps(claudeEntries, baseDir);
+  const installedTargets = [claudePath];
+
+  if (codexSelected.length > 0) {
+    const codexEntries = codexSelected.length === selected.length
+      ? claudeEntries
+      : await resolveMcpEntries(codexSelected);
+    const codexPath = installCodexMcps(codexEntries, baseDir);
+    installedTargets.push(codexPath);
+  }
+
+  printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} into ${installedTargets.join(" and ")}`);
   if (selected.includes("datadog")) {
     printWarning("Datadog requires Codex OAuth after install: run `codex mcp login datadog`.");
   }
   if (selected.includes("atlassian")) {
     printWarning("Atlassian is installed via `mcp-remote`; Codex may show `Auth: Unsupported`, which is expected for this wrapper.");
+  }
+  if (selected.includes("slack")) {
+    printWarning("Slack is installed for Claude only; Codex does not currently support Slack's required fixed-client MCP OAuth flow.");
   }
 }
 
