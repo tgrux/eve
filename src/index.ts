@@ -237,6 +237,65 @@ function writeJsonFile(path: string, value: unknown) {
   writeFileSync(path, JSON.stringify(value, null, 2) + "\n", "utf8");
 }
 
+function isTomlPrimitive(value: unknown): value is string | number | boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function isTomlArray(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.every((item) => isTomlPrimitive(item));
+}
+
+function isTomlTable(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function formatTomlKey(key: string) {
+  return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
+}
+
+function formatTomlValue(value: string | number | boolean | unknown[]): string {
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return `[${value.map((item) => formatTomlValue(item as string | number | boolean | unknown[])).join(", ")}]`;
+}
+
+function serializeTomlTable(path: string[], table: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const scalarEntries = Object.entries(table).filter(([, value]) => isTomlPrimitive(value) || isTomlArray(value));
+  const childTables = Object.entries(table).filter(([, value]) => isTomlTable(value));
+
+  if (path.length > 0) {
+    lines.push(`[${path.map((segment) => formatTomlKey(segment)).join(".")}]`);
+  }
+
+  for (const [key, value] of scalarEntries) {
+    lines.push(`${formatTomlKey(key)} = ${formatTomlValue(value as string | number | boolean | unknown[])}`);
+  }
+
+  if (scalarEntries.length > 0 && childTables.length > 0) {
+    lines.push("");
+  }
+
+  childTables.forEach(([key, value], index) => {
+    lines.push(...serializeTomlTable([...path, key], value as Record<string, unknown>));
+    if (index < childTables.length - 1) {
+      lines.push("");
+    }
+  });
+
+  return lines;
+}
+
+function writeTomlFile(path: string, value: Record<string, unknown>) {
+  ensureDir(dirname(path));
+  const lines = serializeTomlTable([], value);
+  writeFileSync(path, (lines.join("\n").trimEnd() + "\n"), "utf8");
+}
+
 function readTomlFile(path: string) {
   if (!existsSync(path)) {
     return undefined;
@@ -633,7 +692,7 @@ function printClaudeForScope(scopeName: string, scopeRoot: string) {
   const settingsPath = join(scopeRoot, ".claude", "settings.json");
   const settings = readJsonFile(settingsPath);
   const mcpSources = [
-    getMcpFile(scopeRoot),
+    getClaudeMcpFile(scopeRoot),
     join(scopeRoot, ".mcp.json"),
     join(scopeRoot, ".claude", ".mcp.json"),
     join(scopeRoot, ".claude", "managed-mcp.json"),
@@ -779,28 +838,32 @@ function getMcpChoices(): Choice<string>[] {
   }));
 }
 
-function getMcpFile(baseDir: string) {
+function getClaudeMcpFile(baseDir: string) {
   return baseDir === HOME ? join(HOME, ".claude.json") : join(baseDir, ".mcp.json");
 }
 
-function getInstalledMcpKeys(baseDir: string): string[] {
-  const config = readJsonFile(getMcpFile(baseDir)) ?? {};
+function getCodexConfigFile(baseDir: string) {
+  return join(baseDir, ".codex", "config.toml");
+}
+
+function getInstalledClaudeMcpKeys(baseDir: string): string[] {
+  const config = readJsonFile(getClaudeMcpFile(baseDir)) ?? {};
   const servers = config.mcpServers;
   if (!servers || typeof servers !== "object") return [];
   return Object.keys(servers as Record<string, unknown>).sort();
 }
 
-async function installMcps(selected: string[], baseDir: string) {
-  const catalog = getMcpCatalog();
-  const mcpFile = getMcpFile(baseDir);
-  const config = readJsonFile(mcpFile) ?? {};
-  const configRecord = config as Record<string, unknown>;
-  const servers = configRecord.mcpServers && typeof configRecord.mcpServers === "object"
-    ? configRecord.mcpServers as Record<string, unknown>
-    : {};
-  configRecord.mcpServers = servers;
+function getInstalledCodexMcpKeys(baseDir: string): string[] {
+  const config = readTomlFile(getCodexConfigFile(baseDir)) ?? {};
+  return extractMcpNames(config);
+}
 
-  // Collect values for any ${VAR} placeholders found in HTTP MCP headers
+function getInstalledMcpKeys(baseDir: string): string[] {
+  return unique([...getInstalledClaudeMcpKeys(baseDir), ...getInstalledCodexMcpKeys(baseDir)]);
+}
+
+async function resolveMcpEntries(selected: string[]) {
+  const catalog = getMcpCatalog();
   const placeholderValues: Record<string, string> = {};
   for (const key of selected) {
     const entry = catalog[key];
@@ -822,24 +885,68 @@ async function installMcps(selected: string[], baseDir: string) {
   const substitute = (str: string) =>
     str.replace(/\$\{([^}]+)\}/g, (_, v) => placeholderValues[v] ?? `\${${v}}`);
 
+  const resolved: Record<string, unknown> = {};
   for (const key of selected) {
     const entry = catalog[key];
+    if (!entry) {
+      continue;
+    }
     if (entry?.config) {
-      servers[key] = entry.config;
+      resolved[key] = JSON.parse(substitute(JSON.stringify(entry.config)));
     } else {
       for (const [serverKey, serverConfig] of Object.entries(entry)) {
         if (serverKey === "name" || serverKey === "description") continue;
-        servers[serverKey] = JSON.parse(substitute(JSON.stringify(serverConfig)));
+        resolved[serverKey] = JSON.parse(substitute(JSON.stringify(serverConfig)));
       }
     }
   }
 
-  writeJsonFile(mcpFile, configRecord);
-  printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} into ${mcpFile}`);
+  return resolved;
 }
 
-function removeMcps(selected: string[], baseDir: string) {
-  const mcpFile = getMcpFile(baseDir);
+function installClaudeMcps(resolvedEntries: Record<string, unknown>, baseDir: string) {
+  const mcpFile = getClaudeMcpFile(baseDir);
+  const config = readJsonFile(mcpFile) ?? {};
+  const configRecord = config as Record<string, unknown>;
+  const servers = configRecord.mcpServers && typeof configRecord.mcpServers === "object"
+    ? configRecord.mcpServers as Record<string, unknown>
+    : {};
+  configRecord.mcpServers = servers;
+
+  for (const [key, value] of Object.entries(resolvedEntries)) {
+    servers[key] = value;
+  }
+
+  writeJsonFile(mcpFile, configRecord);
+  return mcpFile;
+}
+
+function installCodexMcps(resolvedEntries: Record<string, unknown>, baseDir: string) {
+  const configPath = getCodexConfigFile(baseDir);
+  const config = readTomlFile(configPath) ?? {};
+  const configRecord = config as Record<string, unknown>;
+  const servers = configRecord.mcp_servers && typeof configRecord.mcp_servers === "object"
+    ? configRecord.mcp_servers as Record<string, unknown>
+    : {};
+  configRecord.mcp_servers = servers;
+
+  for (const [key, value] of Object.entries(resolvedEntries)) {
+    servers[key] = value;
+  }
+
+  writeTomlFile(configPath, configRecord);
+  return configPath;
+}
+
+async function installMcps(selected: string[], baseDir: string) {
+  const resolvedEntries = await resolveMcpEntries(selected);
+  const claudePath = installClaudeMcps(resolvedEntries, baseDir);
+  const codexPath = installCodexMcps(resolvedEntries, baseDir);
+  printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} into ${claudePath} and ${codexPath}`);
+}
+
+function removeClaudeMcps(selected: string[], baseDir: string) {
+  const mcpFile = getClaudeMcpFile(baseDir);
   const config = readJsonFile(mcpFile) ?? {};
   const configRecord = config as Record<string, unknown>;
   const servers = configRecord.mcpServers && typeof configRecord.mcpServers === "object"
@@ -852,7 +959,30 @@ function removeMcps(selected: string[], baseDir: string) {
 
   configRecord.mcpServers = servers;
   writeJsonFile(mcpFile, configRecord);
-  printSuccess(`Removed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} from ${mcpFile}`);
+  return mcpFile;
+}
+
+function removeCodexMcps(selected: string[], baseDir: string) {
+  const configPath = getCodexConfigFile(baseDir);
+  const config = readTomlFile(configPath) ?? {};
+  const configRecord = config as Record<string, unknown>;
+  const servers = configRecord.mcp_servers && typeof configRecord.mcp_servers === "object"
+    ? configRecord.mcp_servers as Record<string, unknown>
+    : {};
+
+  for (const key of selected) {
+    delete servers[key];
+  }
+
+  configRecord.mcp_servers = servers;
+  writeTomlFile(configPath, configRecord);
+  return configPath;
+}
+
+function removeMcps(selected: string[], baseDir: string) {
+  const claudePath = removeClaudeMcps(selected, baseDir);
+  const codexPath = removeCodexMcps(selected, baseDir);
+  printSuccess(`Removed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} from ${claudePath} and ${codexPath}`);
 }
 
 function getResourceChoices(location: "global" | "cwd" = "global"): Choice<string>[] {
@@ -881,7 +1011,7 @@ function getResourceChoices(location: "global" | "cwd" = "global"): Choice<strin
     ...commandChoices,
     { value: "header:hooks", label: "Hooks", selectable: false },
     ...hookChoices,
-    { value: "header:mcps", label: "MCP Servers (Claude only)", selectable: false },
+    { value: "header:mcps", label: "MCP Servers", selectable: false },
     ...mcpChoices,
     { value: "header:skills", label: "Skills", selectable: false },
     ...skillChoices,
@@ -1302,7 +1432,7 @@ async function runRemoveWizard() {
       : []),
     ...(installedMcps.length > 0
       ? [
-          { value: "header:mcps", label: "MCP Servers (Claude only)", selectable: false } as Choice<string>,
+          { value: "header:mcps", label: "MCP Servers", selectable: false } as Choice<string>,
           ...installedMcps.map((key) => ({
             value: "mcp:" + key,
             label: key,

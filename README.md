@@ -42,6 +42,7 @@ eve add           # Wizard to install global commands, hooks, and skills from re
 
 - `Commands` symlink markdown files from `resources/commands/` into `~/.claude/commands/`
 - `Hooks` symlink hook files from `resources/hooks/` into `~/.claude/hooks/` and merge selected hook definitions into `~/.claude/settings.json`
+- `MCPs` merge selected server configs into Claude and Codex config files
 - `Skills` symlink selected skill directories from `resources/skills/` plus any configured extra skill roots into `~/.codex/skills/`, `~/.claude/skills/`, or both
 - Wizard controls: `↑/↓` move, `space` toggles items, `enter` confirms, `q` cancels
 
