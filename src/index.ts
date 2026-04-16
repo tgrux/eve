@@ -943,6 +943,12 @@ async function installMcps(selected: string[], baseDir: string) {
   const claudePath = installClaudeMcps(resolvedEntries, baseDir);
   const codexPath = installCodexMcps(resolvedEntries, baseDir);
   printSuccess(`Installed ${selected.length} ${pluralize(selected.length, "MCP", "MCPs")} into ${claudePath} and ${codexPath}`);
+  if (selected.includes("datadog")) {
+    printWarning("Datadog requires Codex OAuth after install: run `codex mcp login datadog`.");
+  }
+  if (selected.includes("atlassian")) {
+    printWarning("Atlassian is installed via `mcp-remote`; Codex may show `Auth: Unsupported`, which is expected for this wrapper.");
+  }
 }
 
 function removeClaudeMcps(selected: string[], baseDir: string) {
