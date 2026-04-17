@@ -834,7 +834,9 @@ function getMcpChoices(): Choice<string>[] {
   return Object.entries(catalog).map(([key, value]) => ({
     value: key,
     label: value.name ?? key,
-    description: value.description,
+    description: key === "slack"
+      ? [value.description, "Claude only"].filter(Boolean).join(" - ")
+      : value.description,
   }));
 }
 
