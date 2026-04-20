@@ -302,7 +302,7 @@ The bash script lives in ai-ralph/ but is designed to be run from the project ro
  
 The script parses stream-json output from Claude Code, displaying both agent output and any stop-hook output (e.g., linting tools like Zenable). Stop hooks inject their output as `user` type events in the stream — the `seen_assistant` flag distinguishes these from the initial prompt submission.
  
-**Local execution:** Copy `.claude/skills/ralph-loop-docs/references/ralph.sh` to `ai-ralph/ralph.sh` and make it executable (`chmod +x ai-ralph/ralph.sh`). This script is ready to use as-is for local execution.
+**Local execution:** Copy `/Users/tim.giegel/Code/_tools/eve/resources/skills/ralph-loop-docs/references/ralph.sh` to `ai-ralph/ralph.sh` and make it executable (`chmod +x ai-ralph/ralph.sh`). This script is ready to use as-is for local execution.
 
 **Dockerized execution adaptation:** To run inside Docker instead, add `IMAGE="ralph-sandbox"` near the top of the script, add an image existence check after the API key validation:
 
@@ -333,7 +333,7 @@ Note: Stop hooks configured on the host machine will **not** fire inside the Doc
  
 #### 2F: Create ai-ralph/Dockerfile
 
-Copy `.claude/skills/ralph-loop-docs/references/Dockerfile` to `ai-ralph/Dockerfile`. Build the image from the project root (one-time, or after updating the Dockerfile):
+Copy `/Users/tim.giegel/Code/_tools/eve/resources/skills/ralph-loop-docs/references/Dockerfile` to `ai-ralph/Dockerfile`. Build the image from the project root (one-time, or after updating the Dockerfile):
 
 ```bash
 docker build -t ralph-sandbox ai-ralph/
@@ -343,7 +343,7 @@ The image name `ralph-sandbox` must match the `IMAGE` variable in ralph.sh.
 
 #### 2G: Create ai-ralph/ralph-how-to.md
 
-Copy `.claude/skills/ralph-loop-docs/references/ralph-how-to.md` to `ai-ralph/ralph-how-to.md`. This covers Colima setup, API key configuration, permissions, and how to run the loop.
+Copy `/Users/tim.giegel/Code/_tools/eve/resources/skills/ralph-loop-docs/references/ralph-how-to.md` to `ai-ralph/ralph-how-to.md`. This covers Colima setup, API key configuration, permissions, and how to run the loop.
  
 ---
 

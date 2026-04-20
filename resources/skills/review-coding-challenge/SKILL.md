@@ -9,9 +9,9 @@ Evaluate a candidate's coding challenge submission against the standard rubric. 
 
 ## Step 0: What Test Type?
 
-Make sure you understand what test type it is, the Frontend Test or Backend Test.  Once you know which on it is, read through the instructions the candidate received:
-- [FE Test](.claude/skills/review-coding-challenge/references/fe-test.md) 
-- [BE Test](.claude/skills/review-coding-challenge/references/be-test.md)
+Make sure you understand what test type it is, the Frontend Test or Backend Test. Once you know which one it is, read the instructions the candidate received:
+- FE Test: `/Users/tim.giegel/Code/_tools/eve/resources/skills/review-coding-challenge/references/fe-test.md`
+- BE Test: `/Users/tim.giegel/Code/_tools/eve/resources/skills/review-coding-challenge/references/be-test.md`
 
 ## Step 1: Read the submission
 
@@ -32,7 +32,7 @@ Use the rubric below. For each category, cite specific file and line number evid
 
 ## Rubric
 
-Read the full rubric at `.claude/skills/review-coding-challenge/references/rubric.md` before scoring — it defines what Red X, Thumbs Down, Thumbs Up, and Star mean for each category, plus the minimum passing threshold (Thumbs Up in all four categories).
+Read the full rubric at `/Users/tim.giegel/Code/_tools/eve/resources/skills/review-coding-challenge/references/rubric.md` before scoring — it defines what Red X, Thumbs Down, Thumbs Up, and Star mean for each category, plus the minimum passing threshold (Thumbs Up in all four categories).
 
 ### Code Completion
 

@@ -48,7 +48,7 @@ Ask the user: "Is this your first time setting up dot-com, or are you returning 
 Use the Brewfile to install all required dependencies:
 
 ```bash
-brew bundle --file=.claude/skills/dotcom/references/Brewfile
+brew bundle --file=/Users/tim.giegel/Code/_tools/eve/resources/skills/dot-com-setup/references/Brewfile
 ```
 
 Or install manually:
