@@ -42,7 +42,6 @@ Read the full rubric at `/Users/tim.giegel/Code/_tools/eve/resources/skills/revi
 - Are there dead/stub methods left in? (e.g., `console.log` placeholders wired to real events)
 - Does error handling cover the real failure modes, or just the happy path?
 - Are there display/rendering bugs caused by type coercion (e.g., `parseInt` stripping leading zeros)?
-- Is the submit/action button accessible for large datasets or awkward placements?
 
 ---
 
@@ -60,11 +59,13 @@ Read the full rubric at `/Users/tim.giegel/Code/_tools/eve/resources/skills/revi
 ### Communication
 
 **What to look for:**
-- Does the README describe what the app does, not just how to run it?
+- Does the README describe what the app does, not just how to run it? Grade on the quality and intent of explanation, not README length. A short README that explains why outscores a long one that only describes what.
 - Are assumptions documented? (e.g., "CSV is comma-delimited with no headers")
 - Are algorithmic decisions explained? (e.g., why checksum works on any length)
 - Are future improvements or known limitations called out?
 - Is inline code documentation present where logic isn't self-evident?
+- Code comments count toward the Communication score, not just the README. A well-placed comment explaining a trade-off or design decision ("this is overkill but..."  ) is meaningful communication.
+
 
 ---
 
@@ -77,6 +78,10 @@ Read the full rubric at `/Users/tim.giegel/Code/_tools/eve/resources/skills/revi
 - Does the component/module structure reflect the problem, or is everything crammed into one place?
 - Are there dead code artifacts or placeholder methods in the final submission?
 - Is TypeScript used correctly? (strict mode, interfaces, no implicit `any`)
+- Are the framework's reactive primitives (signals, observables, etc.) used consistently for all state, or does the component mix paradigms partway through? Check that reactive imports are actually used.
+  - Do async operations clean up after themselves? Look for subscriptions, promises, or event listeners that aren't torn down when the component is destroyed.
+  - Do async functions actually await something? An async keyword with no await is a sign of paradigm confusion.
+  - Do services expose state in a way that maintains encapsulation, or can callers mutate internal state directly? Do service methods take data as parameters, or silently depend on internal state?
 
 ---
 
