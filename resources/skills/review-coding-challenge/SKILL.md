@@ -7,6 +7,12 @@ description: Evaluate a coding challenge submission against the standard Kin rub
 
 Evaluate a candidate's coding challenge submission against the standard rubric. **Read every relevant source file directly before scoring anything.** Do not assume, summarize from filenames, or delegate to a subagent and trust its summary — verify claims yourself.
 
+## Step 0: What Test Type?
+
+Make sure you understand what test type it is, the Frontend Test or Backend Test.  Once you know which on it is, read through the instructions the candidate received:
+- [FE Test](.claude/skills/review-coding-challenge/references/fe-test.md) 
+- [BE Test](.claude/skills/review-coding-challenge/references/be-test.md)
+
 ## Step 1: Read the submission
 
 Before scoring, read:
@@ -26,15 +32,9 @@ Use the rubric below. For each category, cite specific file and line number evid
 
 ## Rubric
 
-### Code Completion
-> Evaluated vs. the expected completion level for the role they are applying to.
+Read the full rubric at `.claude/skills/review-coding-challenge/references/rubric.md` before scoring — it defines what Red X, Thumbs Down, Thumbs Up, and Star mean for each category, plus the minimum passing threshold (Thumbs Up in all four categories).
 
-| Rating | Criteria |
-|--------|----------|
-| Red X | The code does not compile. The solution does not solve the main problem. There's a significant lack of efficiency. |
-| Thumbs Down | Compiles without errors. Solves the problem. Efficiency could be improved. |
-| Thumbs Up | Compiles without errors. Solves the problem. Reasonably efficient with some areas for improvement. Fails gracefully with some error handling, but does not cover most cases. |
-| Star | Compiles without errors. Optimized for efficiency. Contains most error cases. |
+### Code Completion
 
 **What to look for:**
 - Does it actually run? (check for syntax errors, missing imports, broken dependencies)
@@ -48,13 +48,6 @@ Use the rubric below. For each category, cite specific file and line number evid
 
 ### Tests
 
-| Rating | Criteria |
-|--------|----------|
-| Red X | No tests or only generated boilerplate. Minimal or no real coverage. |
-| Thumbs Down | Few tests, covering only the most obvious cases. Flows could be simplified. |
-| Thumbs Up | Good number of tests covering various scenarios. Flows are mostly straightforward. |
-| Star | Comprehensive tests covering all possible edge cases. Flows are simple and easy to understand. |
-
 **What to look for:**
 - Count actual tests — distinguish real assertions from smoke tests (`expect(component).toBeTruthy()`)
 - Do the tests prove the thing the code claims? (e.g., "handles any length" — are there non-9-digit test cases?)
@@ -66,13 +59,6 @@ Use the rubric below. For each category, cite specific file and line number evid
 
 ### Communication
 
-| Rating | Criteria |
-|--------|----------|
-| Red X | No documentation, minimal or wrong information. Does not describe how to run the system. No environment setup info. Code is not readable. |
-| Thumbs Down | Basic documentation. Attempted to communicate process and intent. Describes how to run the system but lacks clarity. Some setup info but may be incomplete. Code is somewhat readable. |
-| Thumbs Up | Comprehensive documentation with few areas of improvement. Clear and concise communication. Clearly describes how to run the system. Setup and test instructions are mostly clear. Code is mostly easy to follow. |
-| Star | Exceptional documentation. Clearly communicates the solution and demonstrates tangential knowledge (pros/cons of approaches). Detailed run instructions. Precise setup steps, assumptions, and future improvements documented. Code is exceptionally readable. |
-
 **What to look for:**
 - Does the README describe what the app does, not just how to run it?
 - Are assumptions documented? (e.g., "CSV is comma-delimited with no headers")
@@ -83,13 +69,6 @@ Use the rubric below. For each category, cite specific file and line number evid
 ---
 
 ### Code Sophistication
-
-| Rating | Criteria |
-|--------|----------|
-| Red X | Code is difficult to understand. Cluttered and messy. Does not follow language conventions or best practices. |
-| Thumbs Down | Some parts are clean, others are not. Follows some conventions but not consistently. |
-| Thumbs Up | Generally clean (e.g., follows SOLID principles) with minor areas for improvement. Follows language conventions consistently. Good encapsulation. |
-| Star | Clean and well-structured. Follows language conventions consistently. Follows a pattern that fits the problem well (or explains how it would expand to fit). |
 
 **What to look for:**
 - Is logic separated into appropriate layers? (services/utils vs. components)
@@ -130,4 +109,6 @@ Present the evaluation as:
 | Code Sophistication | [rating] |
 
 **Overall take:** [1-2 sentence summary for the hiring team.]
+
+**Hire recommendation:** [Pass / No Pass] — [one sentence explaining the deciding factor. Note any category below Thumbs Up that blocks advancement.]
 ```
