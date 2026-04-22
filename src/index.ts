@@ -19,7 +19,6 @@ const RESOURCES_ROOT = join(REPO_ROOT, "resources");
 const RESOURCE_COMMANDS_ROOT = join(RESOURCES_ROOT, "commands");
 const RESOURCE_HOOK_FILES_ROOT = join(RESOURCES_ROOT, "hooks");
 const RESOURCE_MCPS_ROOT = join(RESOURCES_ROOT, "mcps");
-const RESOURCE_SKILLS_ROOT = join(RESOURCES_ROOT, "skills");
 const RESOURCE_PERMISSIONS_ROOT = join(RESOURCES_ROOT, "permissions");
 const HOME = homedir();
 const BANNER_LINES = [
@@ -531,7 +530,8 @@ async function runPicker<T extends string>(
 
       if (key === "\r") {
         if (options.multi) {
-          finish([...selected].sort((left, right) => left - right).map((index) => choices[index]!.value));
+          const toConfirm = selected.size > 0 ? [...selected] : [cursor];
+          finish(toConfirm.sort((left, right) => left - right).map((index) => choices[index]!.value));
         } else {
           finish([choices[cursor]!.value]);
         }
@@ -623,15 +623,12 @@ function extractSkills(root: string) {
 }
 
 function formatSkillSourceDescription(root: string, skill: string) {
-  if (root === RESOURCE_SKILLS_ROOT) {
-    return "resources/skills/" + skill;
-  }
   return join(root, skill).replace(/\\/g, "/");
 }
 
 function getSkillCatalog() {
   const config = readEveConfig();
-  const roots = unique([RESOURCE_SKILLS_ROOT, ...config.skillRoots]);
+  const roots = unique([...config.skillRoots]);
   const entries: SkillCatalogEntry[] = [];
 
   for (const root of roots) {
