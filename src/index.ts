@@ -13,19 +13,15 @@ import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { stdin as input, stdout as output } from "node:process";
 
-const VERSION = "0.1.0";
 const REPO_ROOT = resolve(import.meta.dir, "..");
+const FALLBACK_VERSION = "0.1.0";
+const VERSION = readPackageVersion();
 const RESOURCES_ROOT = join(REPO_ROOT, "resources");
 const RESOURCE_COMMANDS_ROOT = join(RESOURCES_ROOT, "commands");
 const RESOURCE_HOOK_FILES_ROOT = join(RESOURCES_ROOT, "hooks");
 const RESOURCE_MCPS_ROOT = join(RESOURCES_ROOT, "mcps");
 const RESOURCE_PERMISSIONS_ROOT = join(RESOURCES_ROOT, "permissions");
 const HOME = homedir();
-const BANNER_LINES = [
-  "+----------------------+",
-  "| eve - ai tooling cli |",
-  "+----------------------+",
-];
 
 const colors = {
   blue: "\x1b[34m",
@@ -103,16 +99,25 @@ function colorize(text: string, ...styles: string[]) {
   return styles.join("") + text + colors.reset;
 }
 
+function readPackageVersion() {
+  const packageJson = readJsonFile(resolve(REPO_ROOT, "package.json"));
+  return typeof packageJson?.version === "string" ? packageJson.version : FALLBACK_VERSION;
+}
+
 function formatCommand(command: string[]) {
   return "$ " + command.join(" ");
 }
 
 function printBanner() {
-  const lines = [...BANNER_LINES];
-  lines[1] = lines[1]
-    .replace("eve", colorize("eve", colors.bold, colors.cyan))
-    .replace("ai tooling cli", colorize("ai tooling cli", colors.bold, colors.blue));
-  console.log(lines.join("\n"));
+  const title = `eve v${VERSION} - ai tooling cli`;
+  const styledTitle = [
+    colorize("eve", colors.bold, colors.cyan),
+    colorize("v" + VERSION, colors.bold, colors.green),
+    "-",
+    colorize("ai tooling cli", colors.bold, colors.blue),
+  ].join(" ");
+  const border = "+" + "-".repeat(title.length + 2) + "+";
+  console.log([border, "| " + styledTitle + " |", border].join("\n"));
 }
 
 function printSuccess(message: string) {
